@@ -25,55 +25,9 @@ import           Control.Monad.Free.TH
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Free        (FreeT(..), FreeF(..))
 import           Control.Monad.Trans.Free.Church
+import           Data.Conduino.Internal
 import           Data.Foldable
 import           Data.Void
-
-data PipeF i o u a =
-      PAwaitF (i -> a) (u -> a)
-    | PYieldF o a
-  deriving Functor
-
-makeFree ''PipeF
-
--- | Similar to Conduit
---
--- *  @i@: Type of input stream
--- *  @o@: Type of output stream
--- *  @u@: Type of the /result/ of the upstream pipe (Outputted when
---    upstream pipe finishes)
--- *  @m@: Underlying monad
--- *  @a@: Result type (Outputted when finished)
---
--- Some specializations:
---
--- *  A pipe is a /source/ if @i@ is '()': it doesn't need anything to go
---    pump out items.
---
---    If a pipe is source and @a@ is 'Void', it means that it will
---    produce forever.
---
--- *  A pipe is a /sink/ if @o@ is 'Void': it will never yield anything
---    else downstream.
---
--- *  If a pipe is both a source and a sink, it is an /effect/.
---
--- *  Normally you can ask for input upstream with 'await', which returns
---    'Nothing' if the pipe upstream stops producing.  However, if @u@ is
---    'Void', it means that the pipe upstream will never stop, so you can
---    use 'awaitSurely' to get a guaranteed answer.
-newtype Pipe i o u m a = Pipe { pipeFree :: FT (PipeF i o u) m a }
-  deriving (Functor, Applicative, Monad, MonadTrans, MonadFree (PipeF i o u))
-
-type Source o  = Pipe () o
-type Sink   i  = Pipe i  Void
-type Effect    = Pipe () Void
-type Forever p = p Void
-
-awaitEither :: Pipe i o u m (Either i u)
-awaitEither = pAwaitF
-
-yield :: o -> Pipe i o u m ()
-yield = pYieldF
 
 await :: Pipe i o u m (Maybe i)
 await = either Just (const Nothing) <$> awaitEither
@@ -142,11 +96,6 @@ awaitForever f = go
     go = awaitEither >>= \case
       Left x  -> f x *> go
       Right x -> pure x
-
--- finishPipe
---     :: u
---     -> Pipe i o u    m a
---     -> Pipe i o Void m a
 
 mapP :: (a -> b) -> Pipe a b u m u
 mapP f = awaitForever (yield . f)
