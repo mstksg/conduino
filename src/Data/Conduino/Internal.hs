@@ -11,6 +11,9 @@ module Data.Conduino.Internal (
   , PipeF(..)
   , awaitEither
   , yield
+  , trimapPipe, mapInput, mapOutput, mapUpRes
+  , RecPipe
+  , toRecPipe, fromRecPipe
   -- , (.|)
   -- , runPipe
   -- , awaitEither, await, awaitSurely
@@ -28,11 +31,12 @@ import           Control.Monad.Free.TH
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Free        (FreeT(..), FreeF(..))
 import           Control.Monad.Trans.Free.Church
+import           Data.Coerce
 import           Data.Foldable
 import           Data.Void
 
 data PipeF i o u a =
-      PAwaitF (i -> a) (u -> a)
+      PAwaitF (u -> a) (i -> a)
     | PYieldF o a
   deriving Functor
 
@@ -70,14 +74,57 @@ newtype Pipe i o u m a = Pipe { pipeFree :: FT (PipeF i o u) m a }
            , MonadFree (PipeF i o u)
            )
 
-type Source o  = Pipe () o
-type Sink   i  = Pipe i  Void
-type Effect    = Pipe () Void
-type Forever p = p Void
-
-awaitEither :: Pipe i o u m (Either i u)
+-- | Await on upstream output.  Will block until it receives an @i@
+-- (expected input type) or a @u@ if the upstream pipe terminates.
+awaitEither :: Pipe i o u m (Either u i)
 awaitEither = pAwaitF
 
+-- | Send output downstream.
 yield :: o -> Pipe i o u m ()
 yield = pYieldF
 
+-- | Map over the input type, output type, and upstream result type.
+--
+-- If you want to map over the result type, use 'fmap'.
+trimapPipe
+    :: (i -> j)
+    -> (p -> o)
+    -> (u -> v)
+    -> Pipe j p v m a
+    -> Pipe i o u m a
+trimapPipe f g h = Pipe . transFT go . pipeFree
+  where
+    go = \case
+      PAwaitF a b -> PAwaitF (a . h) (b . f)
+      PYieldF a x -> PYieldF (g a) x
+
+-- | (Contravariantly) map over the expected input type.
+mapInput :: (i -> j) -> Pipe j o u m a -> Pipe i o u m a
+mapInput f = trimapPipe f id id
+
+-- | Map over the downstream output type.
+--
+-- If you want to map over the result type, use 'fmap'.
+mapOutput :: (p -> o) -> Pipe i p u m a -> Pipe i o u m a
+mapOutput f = trimapPipe id f id
+
+-- | (Contravariantly) map over the upstream result type.
+mapUpRes :: (u -> v) -> Pipe i o v m a -> Pipe i o u m a
+mapUpRes = trimapPipe id id
+
+-- | A version of 'Pipe' that uses explicit, concrete recursion instead of
+-- church-encoding like 'Pipe'.  Some functions --- especially ones that
+-- combine multiple pipes into one --- are easier to implement in this
+-- form.
+type RecPipe i o u = FreeT (PipeF i o u)
+
+
+-- | Convert from a 'Pipe' to a 'RecPipe'.  While most of this library is
+-- defined in terms of 'Pipe', it can be easier to write certain low-level
+-- pipe combining functions in terms of 'RecPipe' than 'Pipe'.
+toRecPipe :: Monad m => Pipe i o u m a -> RecPipe i o u m a
+toRecPipe = fromFT . pipeFree
+
+-- | Convert a 'RecPipe' back into a 'Pipe'.
+fromRecPipe :: Monad m => RecPipe i o u m a -> Pipe i o u m a
+fromRecPipe = Pipe . toFT
