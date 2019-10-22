@@ -1,9 +1,12 @@
 {-# LANGUAGE DeriveFunctor              #-}
 {-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FunctionalDependencies     #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TemplateHaskell            #-}
+{-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE TypeInType                 #-}
 
 module Data.Conduino.Internal (
@@ -33,6 +36,7 @@ import           Control.Monad.Trans.Free        (FreeT(..), FreeF(..))
 import           Control.Monad.Trans.Free.Church
 import           Data.Coerce
 import           Data.Foldable
+import           Data.Kind
 import           Data.Void
 
 data PipeF i o u a =
@@ -41,6 +45,23 @@ data PipeF i o u a =
   deriving Functor
 
 makeFree ''PipeF
+
+data PipeType = Source  Type
+              | Conduit Type Type
+              | Sink    Type
+              | Effect
+
+type family PTInput pt :: Type where
+    PTInput ('Source    o) = ()
+    PTInput ('Conduit i o) = i
+    PTInput ('Sink    i  ) = i
+    PTInput  'Effect       = ()
+
+type family PTOutput pt :: Type where
+    PTOutput ('Source    o) = o
+    PTOutput ('Conduit i o) = o
+    PTOutput ('Sink    i  ) = Void
+    PTOutput  'Effect       = Void
 
 -- | Similar to Conduit
 --
@@ -66,65 +87,77 @@ makeFree ''PipeF
 --    'Nothing' if the pipe upstream stops producing.  However, if @u@ is
 --    'Void', it means that the pipe upstream will never stop, so you can
 --    use 'awaitSurely' to get a guaranteed answer.
-newtype Pipe i o u m a = Pipe { pipeFree :: FT (PipeF i o u) m a }
+newtype Pipe (pt :: PipeType) u m a = Pipe { pipeFree :: FT (PipeF (PTInput pt) (PTOutput pt) u) m a }
   deriving ( Functor
            , Applicative
            , Monad
            , MonadTrans
-           , MonadFree (PipeF i o u)
+           -- , MonadFree (PipeF i o u)
            )
 
 -- | Await on upstream output.  Will block until it receives an @i@
 -- (expected input type) or a @u@ if the upstream pipe terminates.
-awaitEither :: Pipe i o u m (Either u i)
-awaitEither = pAwaitF
+awaitEither :: (PTInput pt ~ i) => Pipe pt u m (Either u i)
+awaitEither = Pipe pAwaitF
 
 -- | Send output downstream.
-yield :: o -> Pipe i o u m ()
-yield = pYieldF
+yield :: (PTOutput pt ~ o) => o -> Pipe pt u m ()
+yield = Pipe . pYieldF
+
+
+-- -- | Await on upstream output.  Will block until it receives an @i@
+-- -- (expected input type) or a @u@ if the upstream pipe terminates.
+-- awaitEither :: Pipe i o u m (Either u i)
+-- awaitEither = pAwaitF
+
+---- | Send output downstream.
+--yield :: o -> Pipe i o u m ()
+--yield = pYieldF
 
 -- | Map over the input type, output type, and upstream result type.
 --
 -- If you want to map over the result type, use 'fmap'.
 trimapPipe
-    :: (i -> j)
-    -> (p -> o)
+    :: forall pt qt u v m a. ()
+    => (PTInput qt -> PTInput pt)
+    -> (PTOutput pt -> PTOutput qt)
     -> (u -> v)
-    -> Pipe j p v m a
-    -> Pipe i o u m a
+    -> Pipe pt v m a
+    -> Pipe qt u m a
 trimapPipe f g h = Pipe . transFT go . pipeFree
   where
+    go :: PipeF (PTInput pt) (PTOutput pt) v x -> PipeF (PTInput qt) (PTOutput qt) u x
     go = \case
       PAwaitF a b -> PAwaitF (a . h) (b . f)
       PYieldF a x -> PYieldF (g a) x
 
--- | (Contravariantly) map over the expected input type.
-mapInput :: (i -> j) -> Pipe j o u m a -> Pipe i o u m a
-mapInput f = trimapPipe f id id
+---- | (Contravariantly) map over the expected input type.
+--mapInput :: (i -> j) -> Pipe j o u m a -> Pipe i o u m a
+--mapInput f = trimapPipe f id id
 
--- | Map over the downstream output type.
---
--- If you want to map over the result type, use 'fmap'.
-mapOutput :: (p -> o) -> Pipe i p u m a -> Pipe i o u m a
-mapOutput f = trimapPipe id f id
+---- | Map over the downstream output type.
+----
+---- If you want to map over the result type, use 'fmap'.
+--mapOutput :: (p -> o) -> Pipe i p u m a -> Pipe i o u m a
+--mapOutput f = trimapPipe id f id
 
--- | (Contravariantly) map over the upstream result type.
-mapUpRes :: (u -> v) -> Pipe i o v m a -> Pipe i o u m a
-mapUpRes = trimapPipe id id
+---- | (Contravariantly) map over the upstream result type.
+--mapUpRes :: (u -> v) -> Pipe i o v m a -> Pipe i o u m a
+--mapUpRes = trimapPipe id id
 
--- | A version of 'Pipe' that uses explicit, concrete recursion instead of
--- church-encoding like 'Pipe'.  Some functions --- especially ones that
--- combine multiple pipes into one --- are easier to implement in this
--- form.
-type RecPipe i o u = FreeT (PipeF i o u)
+---- | A version of 'Pipe' that uses explicit, concrete recursion instead of
+---- church-encoding like 'Pipe'.  Some functions --- especially ones that
+---- combine multiple pipes into one --- are easier to implement in this
+---- form.
+--type RecPipe i o u = FreeT (PipeF i o u)
 
 
--- | Convert from a 'Pipe' to a 'RecPipe'.  While most of this library is
--- defined in terms of 'Pipe', it can be easier to write certain low-level
--- pipe combining functions in terms of 'RecPipe' than 'Pipe'.
-toRecPipe :: Monad m => Pipe i o u m a -> RecPipe i o u m a
-toRecPipe = fromFT . pipeFree
+---- | Convert from a 'Pipe' to a 'RecPipe'.  While most of this library is
+---- defined in terms of 'Pipe', it can be easier to write certain low-level
+---- pipe combining functions in terms of 'RecPipe' than 'Pipe'.
+--toRecPipe :: Monad m => Pipe i o u m a -> RecPipe i o u m a
+--toRecPipe = fromFT . pipeFree
 
--- | Convert a 'RecPipe' back into a 'Pipe'.
-fromRecPipe :: Monad m => RecPipe i o u m a -> Pipe i o u m a
-fromRecPipe = Pipe . toFT
+---- | Convert a 'RecPipe' back into a 'Pipe'.
+--fromRecPipe :: Monad m => RecPipe i o u m a -> Pipe i o u m a
+--fromRecPipe = Pipe . toFT
