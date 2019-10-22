@@ -42,10 +42,46 @@ newtype Pipe i o u m a
 Pipe :: FT (PipeF i o u) m a -> Pipe i o u m a
 [pipeFree] :: Pipe i o u m a -> FT (PipeF i o u) m a
 data PipeF i o u a
-PAwaitF :: (i -> a) -> (u -> a) -> PipeF i o u a
+PAwaitF :: (u -> a) -> (i -> a) -> PipeF i o u a
 PYieldF :: o -> a -> PipeF i o u a
-awaitEither :: Pipe i o u m (Either i u)
+
+-- | Await on upstream output. Will block until it receives an <tt>i</tt>
+--   (expected input type) or a <tt>u</tt> if the upstream pipe terminates.
+awaitEither :: Pipe i o u m (Either u i)
+
+-- | Send output downstream.
 yield :: o -> Pipe i o u m ()
+
+-- | Map over the input type, output type, and upstream result type.
+--   
+--   If you want to map over the result type, use <a>fmap</a>.
+trimapPipe :: (i -> j) -> (p -> o) -> (u -> v) -> Pipe j p v m a -> Pipe i o u m a
+
+-- | (Contravariantly) map over the expected input type.
+mapInput :: (i -> j) -> Pipe j o u m a -> Pipe i o u m a
+
+-- | Map over the downstream output type.
+--   
+--   If you want to map over the result type, use <a>fmap</a>.
+mapOutput :: (p -> o) -> Pipe i p u m a -> Pipe i o u m a
+
+-- | (Contravariantly) map over the upstream result type.
+mapUpRes :: (u -> v) -> Pipe i o v m a -> Pipe i o u m a
+
+-- | A version of <a>Pipe</a> that uses explicit, concrete recursion
+--   instead of church-encoding like <a>Pipe</a>. Some functions ---
+--   especially ones that combine multiple pipes into one --- are easier to
+--   implement in this form.
+type RecPipe i o u = FreeT (PipeF i o u)
+
+-- | Convert from a <a>Pipe</a> to a <a>RecPipe</a>. While most of this
+--   library is defined in terms of <a>Pipe</a>, it can be easier to write
+--   certain low-level pipe combining functions in terms of <a>RecPipe</a>
+--   than <a>Pipe</a>.
+toRecPipe :: Monad m => Pipe i o u m a -> RecPipe i o u m a
+
+-- | Convert a <a>RecPipe</a> back into a <a>Pipe</a>.
+fromRecPipe :: Monad m => RecPipe i o u m a -> Pipe i o u m a
 instance Control.Monad.Free.Class.MonadFree (Data.Conduino.Internal.PipeF i o u) (Data.Conduino.Internal.Pipe i o u m)
 instance Control.Monad.Trans.Class.MonadTrans (Data.Conduino.Internal.Pipe i o u)
 instance GHC.Base.Monad (Data.Conduino.Internal.Pipe i o u m)
@@ -83,23 +119,102 @@ module Data.Conduino
 --   answer.</li>
 --   </ul>
 data Pipe i o u m a
+
+-- | The main operator for chaining pipes together. <tt>pipe1 .| pipe2</tt>
+--   will connect the output of <tt>pipe1</tt> to the input of
+--   <tt>pipe2</tt>.
+--   
+--   <a>Running</a> a pipe will draw from <tt>pipe2</tt>, and if
+--   <tt>pipe2</tt> ever asks for input (with <a>await</a> or something
+--   similar), it will block until <tt>pipe1</tt> outputs something (or
+--   signals termination).
+--   
+--   The structure of a full pipeline usually looks like:
+--   
+--   <pre>
+--   <a>runPipe</a> $ someSource
+--            <a>.|</a> somePipe
+--            <a>.|</a> someOtherPipe
+--            <a>.|</a> someSink
+--   </pre>
+--   
+--   Where you route a source into a series of pipes, which eventually ends
+--   up at a sink. <a>runPipe</a> will then produce the result of that
+--   sink.
 (.|) :: Monad m => Pipe a b u m v -> Pipe b c v m r -> Pipe a c u m r
 infixr 2 .|
+
+-- | Run a pipe that is both a source and a sink into the effect that it
+--   represents.
+--   
+--   Usually you wouild construct this using something like:
+--   
+--   <pre>
+--   <a>runPipe</a> $ someSource
+--            <a>.|</a> somePipe
+--            <a>.|</a> someOtherPipe
+--            <a>.|</a> someSink
+--   </pre>
+--   
+--   <a>runPipe</a> will produce the result of that sink.
 runPipe :: Monad m => Pipe () Void u m a -> m a
-awaitEither :: Pipe i o u m (Either i u)
+
+-- | Await on upstream output. Will block until it receives an <tt>i</tt>
+--   (expected input type) or a <tt>u</tt> if the upstream pipe terminates.
+awaitEither :: Pipe i o u m (Either u i)
+
+-- | Await input from upstream. Will block until upstream <a>yield</a>s.
+--   
+--   Will return <a>Nothing</a> if the upstream pipe finishes and
+--   terminates.
+--   
+--   If the upstream pipe never terminates, then you can use
+--   <a>awaitSurely</a> to guarantee a result.
 await :: Pipe i o u m (Maybe i)
+
+-- | Await input from upstream where the upstream pipe is guaranteed to
+--   never terminate.
 awaitSurely :: Pipe i o Void m i
-repeatM :: Monad m => m o -> Pipe i o u m u
-unfoldP :: (b -> Maybe (a, b)) -> b -> Pipe i a u m ()
-unfoldPForever :: (b -> (a, b)) -> b -> Pipe i a u m r
-iterateP :: (a -> a) -> a -> Pipe i a u m r
-sourceList :: Foldable t => t a -> Pipe i a u m ()
+
+-- | A useful utility function over repeated <a>await</a>s. Will repeatedly
+--   <a>await</a> and then continue with the given pipe whenever the
+--   upstream pipe yields.
+--   
+--   Can be used to implement many pipe combinators:
+--   
+--   <pre>
+--   <a>map</a> f = <a>awaitForever</a> $ x -&gt; <a>yield</a> (f x)
+--   </pre>
 awaitForever :: (i -> Pipe i o u m a) -> Pipe i o u m u
-mapP :: (a -> b) -> Pipe a b u m u
-mapMP :: Monad m => (a -> m b) -> Pipe a b u m u
-dropP :: Int -> Pipe i o u m ()
-foldrP :: (a -> b -> b) -> b -> Pipe a Void u m b
-sinkList :: Pipe i Void u m [i]
+
+-- | Send output downstream.
+yield :: o -> Pipe i o u m ()
+
+-- | (Contravariantly) map over the expected input type.
+mapInput :: (i -> j) -> Pipe j o u m a -> Pipe i o u m a
+
+-- | Map over the downstream output type.
+--   
+--   If you want to map over the result type, use <a>fmap</a>.
+mapOutput :: (p -> o) -> Pipe i p u m a -> Pipe i o u m a
+
+-- | (Contravariantly) map over the upstream result type.
+mapUpRes :: (u -> v) -> Pipe i o v m a -> Pipe i o u m a
+
+-- | Map over the input type, output type, and upstream result type.
+--   
+--   If you want to map over the result type, use <a>fmap</a>.
+trimapPipe :: (i -> j) -> (p -> o) -> (u -> v) -> Pipe j p v m a -> Pipe i o u m a
+
+-- | A newtype wrapper over a sink (<tt><a>Pipe</a> i <a>Void</a></tt>)
+--   that gives it an alternative <a>Applicative</a> and <a>Alternative</a>
+--   instance.
+--   
+--   <a>&lt;*&gt;</a> will distribute input over both sinks, and output a
+--   final result once both sinks finish.
+--   
+--   <a>&lt;|&gt;</a> will distribute input over both sinks, and output a
+--   final result as soon as one or the other finishes.
 newtype ZipSink i u m a
 ZipSink :: Pipe i Void u m a -> ZipSink i u m a
 [getZipSink] :: ZipSink i u m a -> Pipe i Void u m a
@@ -107,5 +222,24 @@ instance GHC.Base.Functor (Data.Conduino.ZipSink i u m)
 instance GHC.Base.Monad m => GHC.Base.Applicative (Data.Conduino.ZipSink i u m)
 instance GHC.Base.Monad m => GHC.Base.Alternative (Data.Conduino.ZipSink i u m)
 
-module Lib
-someFunc :: IO ()
+module Data.Conduino.Combinators
+unfold :: (s -> (o, s)) -> s -> Pipe i o u m a
+iterate :: (o -> o) -> o -> Pipe i o u m u
+repeat :: o -> Pipe i o u m u
+unfoldMaybe :: (s -> Maybe (o, s)) -> s -> Pipe i o u m ()
+unfoldEither :: (s -> Either a (o, s)) -> s -> Pipe i o u m a
+iterateMaybe :: (o -> Maybe o) -> o -> Pipe i o u m ()
+iterateEither :: (o -> Either a o) -> o -> Pipe i o u m a
+sourceList :: Foldable t => t a -> Pipe i a u m ()
+replicate :: Int -> o -> Pipe i o u m ()
+repeatM :: Monad m => m o -> Pipe i o u m u
+repeatMaybeM :: Monad m => m (Maybe o) -> Pipe i o u m ()
+repeatEitherM :: Monad m => m (Either a o) -> Pipe i o u m a
+replicateM :: Monad m => Int -> m o -> Pipe i o u m ()
+map :: (a -> b) -> Pipe a b u m u
+mapM :: Monad m => (a -> m b) -> Pipe a b u m u
+drop :: Int -> Pipe i o u m ()
+foldr :: (a -> b -> b) -> b -> Pipe a Void u m b
+foldl :: (b -> a -> b) -> b -> Pipe a Void u m b
+sinkList :: Pipe i Void u m [i]
+fold :: Monoid a => Pipe a Void u m a
