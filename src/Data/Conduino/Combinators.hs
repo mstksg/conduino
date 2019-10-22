@@ -83,13 +83,13 @@ iterateMaybe f = unfoldMaybe (fmap (join (,)) . f)
 iterate
     :: (o -> o)
     -> o
-    -> Pipe i o u m u
+    -> Pipe i o u m a
 iterate f = unfold (join (,) . f)
 
 sourceList :: Foldable t => t a -> Pipe i a u m ()
 sourceList = traverse_ yield
 
-repeat :: o -> Pipe i o u m u
+repeat :: o -> Pipe i o u m a
 repeat = forever . yield
 
 replicate :: Int -> o -> Pipe i o u m ()
@@ -121,7 +121,7 @@ replicateM n x = replicateM_ n $ lift x >>= yield
 repeatM
     :: Monad m
     => m o
-    -> Pipe i o u m u
+    -> Pipe i o u m a
 repeatM x = go
   where
     go = (yield =<< lift x) *> go
@@ -132,24 +132,24 @@ map f = awaitForever (yield . f)
 mapM :: Monad m => (a -> m b) -> Pipe a b u m u
 mapM f = awaitForever ((yield =<<) . lift . f)
 
-foldr :: (a -> b -> b) -> b -> Pipe a Void u m b
+foldr :: (a -> b -> b) -> b -> Pipe a o u m b
 foldr f z = go
   where
     go = await >>= \case
       Nothing -> pure z
       Just x  -> f x <$> go
 
-foldl :: (b -> a -> b) -> b -> Pipe a Void u m b
+foldl :: (b -> a -> b) -> b -> Pipe a o u m b
 foldl f = go
   where
     go !z = await >>= \case
       Nothing -> pure z
       Just !x -> go (f z x)
 
-fold :: Monoid a => Pipe a Void u m a
+fold :: Monoid a => Pipe a o u m a
 fold = foldl (<>) mempty
 
-sinkList :: Pipe i Void u m [i]
+sinkList :: Pipe i o u m [i]
 sinkList = foldr (:) []
 
 drop :: Int -> Pipe i o u m ()

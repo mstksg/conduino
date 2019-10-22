@@ -71,9 +71,9 @@ awaitForeverWith f g = go
 --
 -- @
 -- 'runPipe' $ someSource
---          '.|' somePipe
---          '.|' someOtherPipe
---          '.|' someSink
+--        '.|' somePipe
+--        '.|' someOtherPipe
+--        '.|' someSink
 -- @
 --
 -- 'runPipe' will produce the result of that sink.
@@ -95,9 +95,9 @@ runPipe = iterT go . pipeFree
 --
 -- @
 -- 'runPipe' $ someSource
---          '.|' somePipe
---          '.|' someOtherPipe
---          '.|' someSink
+--        '.|' somePipe
+--        '.|' someOtherPipe
+--        '.|' someSink
 -- @
 --
 -- Where you route a source into a series of pipes, which eventually ends
