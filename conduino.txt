@@ -133,9 +133,9 @@ data Pipe i o u m a
 --   
 --   <pre>
 --   <a>runPipe</a> $ someSource
---            <a>.|</a> somePipe
---            <a>.|</a> someOtherPipe
---            <a>.|</a> someSink
+--          <a>.|</a> somePipe
+--          <a>.|</a> someOtherPipe
+--          <a>.|</a> someSink
 --   </pre>
 --   
 --   Where you route a source into a series of pipes, which eventually ends
@@ -151,9 +151,9 @@ infixr 2 .|
 --   
 --   <pre>
 --   <a>runPipe</a> $ someSource
---            <a>.|</a> somePipe
---            <a>.|</a> someOtherPipe
---            <a>.|</a> someSink
+--          <a>.|</a> somePipe
+--          <a>.|</a> someOtherPipe
+--          <a>.|</a> someSink
 --   </pre>
 --   
 --   <a>runPipe</a> will produce the result of that sink.
@@ -224,22 +224,22 @@ instance GHC.Base.Monad m => GHC.Base.Alternative (Data.Conduino.ZipSink i u m)
 
 module Data.Conduino.Combinators
 unfold :: (s -> (o, s)) -> s -> Pipe i o u m a
-iterate :: (o -> o) -> o -> Pipe i o u m u
-repeat :: o -> Pipe i o u m u
+iterate :: (o -> o) -> o -> Pipe i o u m a
+repeat :: o -> Pipe i o u m a
 unfoldMaybe :: (s -> Maybe (o, s)) -> s -> Pipe i o u m ()
 unfoldEither :: (s -> Either a (o, s)) -> s -> Pipe i o u m a
 iterateMaybe :: (o -> Maybe o) -> o -> Pipe i o u m ()
 iterateEither :: (o -> Either a o) -> o -> Pipe i o u m a
 sourceList :: Foldable t => t a -> Pipe i a u m ()
 replicate :: Int -> o -> Pipe i o u m ()
-repeatM :: Monad m => m o -> Pipe i o u m u
+repeatM :: Monad m => m o -> Pipe i o u m a
 repeatMaybeM :: Monad m => m (Maybe o) -> Pipe i o u m ()
 repeatEitherM :: Monad m => m (Either a o) -> Pipe i o u m a
 replicateM :: Monad m => Int -> m o -> Pipe i o u m ()
 map :: (a -> b) -> Pipe a b u m u
 mapM :: Monad m => (a -> m b) -> Pipe a b u m u
 drop :: Int -> Pipe i o u m ()
-foldr :: (a -> b -> b) -> b -> Pipe a Void u m b
-foldl :: (b -> a -> b) -> b -> Pipe a Void u m b
-sinkList :: Pipe i Void u m [i]
-fold :: Monoid a => Pipe a Void u m a
+foldr :: (a -> b -> b) -> b -> Pipe a o u m b
+foldl :: (b -> a -> b) -> b -> Pipe a o u m b
+sinkList :: Pipe i o u m [i]
+fold :: Monoid a => Pipe a o u m a
