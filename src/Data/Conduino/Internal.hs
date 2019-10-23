@@ -12,7 +12,7 @@
 module Data.Conduino.Internal (
     Pipe(..)
   , PipeF(..)
-  , PipeType(..), PTInput, PTOutput
+  , PipeType(..), InputOf, OutputOf
   , awaitEither
   , yield
   , trimapPipe
@@ -53,17 +53,17 @@ data PipeType = Source  Type
               | Sink    Type
               | Effect
 
-type family PTInput pt :: Type where
-    PTInput ('Source    o) = ()
-    PTInput ('Conduit i o) = i
-    PTInput ('Sink    i  ) = i
-    PTInput  'Effect       = ()
+type family InputOf pt :: Type where
+    InputOf ('Source    o) = ()
+    InputOf ('Conduit i o) = i
+    InputOf ('Sink    i  ) = i
+    InputOf  'Effect       = ()
 
-type family PTOutput pt :: Type where
-    PTOutput ('Source    o) = o
-    PTOutput ('Conduit i o) = o
-    PTOutput ('Sink    i  ) = Void
-    PTOutput  'Effect       = Void
+type family OutputOf pt :: Type where
+    OutputOf ('Source    o) = o
+    OutputOf ('Conduit i o) = o
+    OutputOf ('Sink    i  ) = Void
+    OutputOf  'Effect       = Void
 
 
 -- | Similar to Conduit
@@ -90,7 +90,7 @@ type family PTOutput pt :: Type where
 --    'Nothing' if the pipe upstream stops producing.  However, if @u@ is
 --    'Void', it means that the pipe upstream will never stop, so you can
 --    use 'awaitSurely' to get a guaranteed answer.
-newtype Pipe (pt :: PipeType) u m a = Pipe { pipeFree :: FT (PipeF (PTInput pt) (PTOutput pt) u) m a }
+newtype Pipe (pt :: PipeType) u m a = Pipe { pipeFree :: FT (PipeF (InputOf pt) (OutputOf pt) u) m a }
   deriving ( Functor
            , Applicative
            , Monad
@@ -100,11 +100,11 @@ newtype Pipe (pt :: PipeType) u m a = Pipe { pipeFree :: FT (PipeF (PTInput pt) 
 
 -- | Await on upstream output.  Will block until it receives an @i@
 -- (expected input type) or a @u@ if the upstream pipe terminates.
-awaitEither :: Pipe pt u m (Either u (PTInput pt))
+awaitEither :: Pipe pt u m (Either u (InputOf pt))
 awaitEither = Pipe pAwaitF
 
 -- | Send output downstream.
-yield :: PTOutput pt -> Pipe pt u m ()
+yield :: OutputOf pt -> Pipe pt u m ()
 yield = Pipe . pYieldF
 
 
@@ -122,14 +122,14 @@ yield = Pipe . pYieldF
 -- If you want to map over the result type, use 'fmap'.
 trimapPipe
     :: forall pt qt u v m a. ()
-    => (PTInput qt -> PTInput pt)
-    -> (PTOutput pt -> PTOutput qt)
+    => (InputOf qt -> InputOf pt)
+    -> (OutputOf pt -> OutputOf qt)
     -> (u -> v)
     -> Pipe pt v m a
     -> Pipe qt u m a
 trimapPipe f g h = Pipe . transFT go . pipeFree
   where
-    go :: PipeF (PTInput pt) (PTOutput pt) v x -> PipeF (PTInput qt) (PTOutput qt) u x
+    go :: PipeF (InputOf pt) (OutputOf pt) v x -> PipeF (InputOf qt) (OutputOf qt) u x
     go = \case
       PAwaitF a b -> PAwaitF (a . h) (b . f)
       PYieldF a x -> PYieldF (g a) x
@@ -158,9 +158,9 @@ type RecPipe i o u = FreeT (PipeF i o u)
 -- | Convert from a 'Pipe' to a 'RecPipe'.  While most of this library is
 -- defined in terms of 'Pipe', it can be easier to write certain low-level
 -- pipe combining functions in terms of 'RecPipe' than 'Pipe'.
-toRecPipe :: Monad m => Pipe pt u m a -> RecPipe (PTInput pt) (PTOutput pt) u m a
+toRecPipe :: Monad m => Pipe pt u m a -> RecPipe (InputOf pt) (OutputOf pt) u m a
 toRecPipe = fromFT . pipeFree
 
 -- | Convert a 'RecPipe' back into a 'Pipe'.
-fromRecPipe :: Monad m => RecPipe (PTInput pt) (PTOutput pt) u m a -> Pipe pt u m a
+fromRecPipe :: Monad m => RecPipe (InputOf pt) (OutputOf pt) u m a -> Pipe pt u m a
 fromRecPipe = Pipe . toFT

@@ -1,6 +1,7 @@
 {-# LANGUAGE AllowAmbiguousTypes        #-}
 {-# LANGUAGE DeriveFunctor              #-}
 {-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE FunctionalDependencies     #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
@@ -28,6 +29,7 @@ import           Control.Monad.Free.TH
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Free        (FreeT(..), FreeF(..))
 import           Control.Monad.Trans.Free.Church
+import           Data.Coerce
 import           Data.Conduino.Internal
 import           Data.Foldable
 import           Data.Type.Equality
@@ -41,12 +43,12 @@ import           Unsafe.Coerce
 --
 -- If the upstream pipe never terminates, then you can use 'awaitSurely' to
 -- guarantee a result.
-await :: Pipe pt u m (Maybe (PTInput pt))
+await :: Pipe pt u m (Maybe (InputOf pt))
 await = either (const Nothing) Just <$> awaitEither
 
 -- | Await input from upstream where the upstream pipe is guaranteed to
 -- never terminate.
-awaitSurely :: Pipe pt Void m (PTInput pt)
+awaitSurely :: Pipe pt Void m (InputOf pt)
 awaitSurely = either absurd id <$> awaitEither
 
 -- | A useful utility function over repeated 'await's.  Will repeatedly
@@ -58,7 +60,7 @@ awaitSurely = either absurd id <$> awaitEither
 -- @
 -- 'Data.Conduino.Combinators.map' f = 'awaitForever' $ \x -> 'yield' (f x)
 -- @
-awaitForever :: (PTInput pt -> Pipe pt u m a) -> Pipe pt u m u
+awaitForever :: (InputOf pt -> Pipe pt u m a) -> Pipe pt u m u
 awaitForever = awaitForeverWith pure
 
 -- | 'awaitForever', but with a way to handle the result of the
@@ -66,7 +68,7 @@ awaitForever = awaitForeverWith pure
 -- producing.
 awaitForeverWith
     :: (u -> Pipe pt u m b)       -- ^ how to handle upstream ending, transitioning to a source
-    -> (PTInput pt -> Pipe pt u m a)        -- ^ how to handle upstream output
+    -> (InputOf pt -> Pipe pt u m a)        -- ^ how to handle upstream output
     -> Pipe pt u m b
 awaitForeverWith f g = undefined
   where
@@ -74,8 +76,19 @@ awaitForeverWith f g = undefined
     --   Left x  -> mapInput (const ()) $ f x
     --   Right x -> g x *> go
 
-class Is pt qt where
-    convertPipe :: Pipe pt u m a -> Pipe qt u m a
+convertPipe
+    :: (InputOf pt ~ InputOf qt, OutputOf pt ~ OutputOf qt)
+    => Pipe pt u m a
+    -> Pipe qt u m a
+convertPipe = coerce
+
+-- class Is pt qt where
+--     convertPipe :: Pipe pt u m a -> Pipe qt u m a
+
+--     default
+--     convertPipe = coerce
+
+-- instance Is Effect (Sink ())
 
 -- | Run a pipe that is both a source and a sink into the effect that it
 -- represents.
@@ -90,14 +103,14 @@ class Is pt qt where
 -- @
 --
 -- 'runPipe' will produce the result of that sink.
-runPipe :: forall pt u m a. (Monad m, Is pt 'Effect) => Pipe pt u m a -> m a
-runPipe = iterT go . pipeFree . convertPipe @pt @'Effect
+runPipe :: Monad m => Pipe Effect u m a -> m a
+runPipe = iterT go . pipeFree
   where
     go = \case
       PAwaitF _ f -> f ()
       PYieldF o _ -> absurd o
 
-class (PTOutput pt ~ PTInput qt, PTInput pt ~ PTInput (pt .| qt), PTOutput qt ~ PTOutput (pt .| qt)) => Pipeable pt qt where
+class (OutputOf pt ~ InputOf qt, InputOf pt ~ InputOf (pt .| qt), OutputOf qt ~ OutputOf (pt .| qt)) => Pipeable pt qt where
     type pt .| qt :: PipeType
 
 instance Pipeable (Source a) (Conduit a b) where
@@ -113,7 +126,7 @@ instance Pipeable (Conduit a b) (Conduit b c) where
     type Conduit a b .| Conduit b c = Conduit a c
 
 -- | The main operator for chaining pipes together.  @pipe1 .| pipe2@ will
--- connect the output of @pipe1@ to the input of @pipe2@. 
+-- connect the output of @pipe1@ to the input of @pipe2@.
 --
 -- "Running" a pipe will draw from @pipe2@, and if @pipe2@ ever asks for
 -- input (with 'await' or something similar), it will block until @pipe1@
