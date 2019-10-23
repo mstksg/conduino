@@ -1,17 +1,23 @@
+{-# LANGUAGE AllowAmbiguousTypes        #-}
 {-# LANGUAGE DeriveFunctor              #-}
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
+{-# LANGUAGE TypeApplications           #-}
+{-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE TypeInType                 #-}
+{-# LANGUAGE TypeOperators              #-}
+{-# LANGUAGE UndecidableInstances       #-}
 
 module Data.Conduino (
     Pipe
-  , (.|)
+  , type (.|)
   , runPipe
   , awaitEither, await, awaitSurely, awaitForever, yield
-  , mapInput, mapOutput, mapUpRes, trimapPipe
-  , ZipSink(..)
+  -- , mapInput, mapOutput, mapUpRes, trimapPipe
+  -- , ZipSink(..)
   ) where
 
 import           Control.Applicative
@@ -23,7 +29,10 @@ import           Control.Monad.Trans.Free        (FreeT(..), FreeF(..))
 import           Control.Monad.Trans.Free.Church
 import           Data.Conduino.Internal
 import           Data.Foldable
+import           Data.Type.Equality
 import           Data.Void
+import           GHC.TypeLits
+import           Unsafe.Coerce
 
 -- | Await input from upstream.  Will block until upstream 'yield's.
 --
@@ -31,12 +40,12 @@ import           Data.Void
 --
 -- If the upstream pipe never terminates, then you can use 'awaitSurely' to
 -- guarantee a result.
-await :: Pipe i o u m (Maybe i)
+await :: Pipe pt u m (Maybe (PTInput pt))
 await = either (const Nothing) Just <$> awaitEither
 
 -- | Await input from upstream where the upstream pipe is guaranteed to
 -- never terminate.
-awaitSurely :: Pipe i o Void m i
+awaitSurely :: Pipe pt Void m (PTInput pt)
 awaitSurely = either absurd id <$> awaitEither
 
 -- | A useful utility function over repeated 'await's.  Will repeatedly
@@ -48,21 +57,24 @@ awaitSurely = either absurd id <$> awaitEither
 -- @
 -- 'Data.Conduino.Combinators.map' f = 'awaitForever' $ \x -> 'yield' (f x)
 -- @
-awaitForever :: (i -> Pipe i o u m a) -> Pipe i o u m u
+awaitForever :: (PTInput pt -> Pipe pt u m a) -> Pipe pt u m u
 awaitForever = awaitForeverWith pure
 
 -- | 'awaitForever', but with a way to handle the result of the
 -- upstream pipe, which will be called when the upstream pipe stops
 -- producing.
 awaitForeverWith
-    :: (u -> Pipe () o u m b)       -- ^ how to handle upstream ending, transitioning to a source
-    -> (i -> Pipe i o u m a)        -- ^ how to handle upstream output
-    -> Pipe i o u m b
-awaitForeverWith f g = go
+    :: (u -> Pipe pt u m b)       -- ^ how to handle upstream ending, transitioning to a source
+    -> (PTInput pt -> Pipe pt u m a)        -- ^ how to handle upstream output
+    -> Pipe pt u m b
+awaitForeverWith f g = undefined
   where
-    go = awaitEither >>= \case
-      Left x  -> mapInput (const ()) $ f x
-      Right x -> g x *> go
+    -- go = awaitEither >>= \case
+    --   Left x  -> mapInput (const ()) $ f x
+    --   Right x -> g x *> go
+
+class Is pt qt where
+    convertPipe :: Pipe pt u m a -> Pipe qt u m a
 
 -- | Run a pipe that is both a source and a sink into the effect that it
 -- represents.
@@ -77,12 +89,34 @@ awaitForeverWith f g = go
 -- @
 --
 -- 'runPipe' will produce the result of that sink.
-runPipe :: Monad m => Pipe () Void u m a -> m a
-runPipe = iterT go . pipeFree
+runPipe :: forall pt u m a. (Monad m, Is pt 'Effect) => Pipe pt u m a -> m a
+runPipe = iterT go . pipeFree . convertPipe @pt @'Effect
   where
     go = \case
       PAwaitF _ f -> f ()
       PYieldF o _ -> absurd o
+
+type family pt .| qt where
+    Source o    .| Source    p = TypeError ('Text "Cannot chain anything into a source")
+    Source o    .| Conduit o p = Source p
+    Source o    .| Conduit j p = TypeError ('Text "Cannot chain source of " :<>: 'ShowType o :<>: 'Text " with a conduit expecting " :<>: 'ShowType j)
+    Source o    .| Sink    o   = Effect
+    Source o    .| Sink    p   = TypeError ('Text "Cannot chain source of " :<>: 'ShowType o :<>: 'Text " with a sink expecting " :<>: 'ShowType p)
+    Source p    .| Effect      = TypeError ('Text "Cannot chain anything into an effect")
+    Conduit i o .| Source  p   = TypeError ('Text "Cannot chain anything into a source")
+    Conduit i o .| Conduit o p = Conduit i p
+    Conduit i o .| Conduit q p = TypeError ('Text "Cannot chain conduit yielding " :<>: 'ShowType o :<>: 'Text " with a conduit expecting " :<>: 'ShowType q)
+    Conduit i o .| Sink    o   = Sink i
+    Conduit i o .| Sink    p   = TypeError ('Text "Cannot chain conduit yielding " :<>: 'ShowType o :<>: 'Text " with a sink expecting " :<>: 'ShowType p)
+    Conduit i o .| Effect      = TypeError ('Text "Cannot chain anything into an effect")
+    Sink    i   .| qt          = TypeError ('Text "Cannot chain a sink to anything after it.")
+    Effect      .| qt          = TypeError ('Text "Cannot chain an effect into anything after it.")
+
+ptOutputSame :: PTOutput (pt .| qt) :~: PTOutput qt
+ptOutputSame = unsafeCoerce Refl
+
+ptInputSame :: PTInput (pt .| qt) :~: PTInput qt
+ptInputSame = unsafeCoerce Refl
 
 -- | The main operator for chaining pipes together.  @pipe1 .| pipe2@ will
 -- connect the output of @pipe1@ to the input of @pipe2@. 
@@ -103,11 +137,16 @@ runPipe = iterT go . pipeFree
 -- Where you route a source into a series of pipes, which eventually ends
 -- up at a sink.  'runPipe' will then produce the result of that sink.
 (.|)
-    :: Monad m
-    => Pipe a b u m v
-    -> Pipe b c v m r
-    -> Pipe a c u m r
-Pipe p .| Pipe q = Pipe $ toFT $ compPipe_ (fromFT p) (fromFT q)
+    :: forall pt qt u m v r. Monad m
+    => Pipe pt         u m v
+    -> Pipe qt         v m r
+    -> Pipe (pt .| qt) u m r
+Pipe p .| Pipe q = case ptOutputSame @pt @qt of
+  Refl -> case ptInputSame @pt @qt of
+    Refl -> Pipe $ toFT $ compPipe_ (fromFT p) (fromFT q)
+  -- where
+  --   Refl = ptOutputSame @pt @qt
+infixr 2 .|
 
 compPipe_
     :: forall a b c u v m r. (Monad m)
@@ -122,79 +161,78 @@ compPipe_ p q = FreeT $ runFreeT q >>= \case
                                                     ((`compPipe_` q) . g')
       Free (PYieldF x' y') -> runFreeT $ compPipe_ y' (g x')
     Free (PYieldF x y) -> pure . Free $ PYieldF x (compPipe_ p y)
-infixr 2 .|
 
--- | A newtype wrapper over a sink (@'Pipe' i 'Void'@) that gives it an
--- alternative 'Applicative' and 'Alternative' instance.
---
--- '<*>' will distribute input over both sinks, and output a final result
--- once both sinks finish.
---
--- '<|>' will distribute input over both sinks, and output a final result
--- as soon as one or the other finishes.
-newtype ZipSink i u m a = ZipSink { getZipSink :: Pipe i Void u m a }
-  deriving Functor
+---- | A newtype wrapper over a sink (@'Pipe' i 'Void'@) that gives it an
+---- alternative 'Applicative' and 'Alternative' instance.
+----
+---- '<*>' will distribute input over both sinks, and output a final result
+---- once both sinks finish.
+----
+---- '<|>' will distribute input over both sinks, and output a final result
+---- as soon as one or the other finishes.
+--newtype ZipSink i u m a = ZipSink { getZipSink :: Pipe i Void u m a }
+--  deriving Functor
 
-zipSink_
-    :: Monad m
-    => RecPipe i Void u m (a -> b)
-    -> RecPipe i Void u m a
-    -> RecPipe i Void u m b
-zipSink_ p q = FreeT $ go <$> runFreeT p <*> runFreeT q
-  where
-    go = \case
-      Pure x             -> \case
-        Pure x'              -> Pure $ x x'
-        Free (PAwaitF f' g') -> Free $ PAwaitF (zipSink_ p . f') (zipSink_ p . g')
-        Free (PYieldF x' _ ) -> absurd x'
-      Free (PAwaitF f g) -> \case
-        Pure _               -> Free $ PAwaitF ((`zipSink_` q) . f) ((`zipSink_` q) . g)
-        Free (PAwaitF f' g') -> Free $ PAwaitF (zipSink_ <$> f <*> f') (zipSink_ <$> g <*> g')
-        Free (PYieldF x' _ ) -> absurd x'
-      Free (PYieldF x _) -> absurd x
+--zipSink_
+--    :: Monad m
+--    => RecPipe i Void u m (a -> b)
+--    -> RecPipe i Void u m a
+--    -> RecPipe i Void u m b
+--zipSink_ p q = FreeT $ go <$> runFreeT p <*> runFreeT q
+--  where
+--    go = \case
+--      Pure x             -> \case
+--        Pure x'              -> Pure $ x x'
+--        Free (PAwaitF f' g') -> Free $ PAwaitF (zipSink_ p . f') (zipSink_ p . g')
+--        Free (PYieldF x' _ ) -> absurd x'
+--      Free (PAwaitF f g) -> \case
+--        Pure _               -> Free $ PAwaitF ((`zipSink_` q) . f) ((`zipSink_` q) . g)
+--        Free (PAwaitF f' g') -> Free $ PAwaitF (zipSink_ <$> f <*> f') (zipSink_ <$> g <*> g')
+--        Free (PYieldF x' _ ) -> absurd x'
+--      Free (PYieldF x _) -> absurd x
 
-altSink_
-    :: Monad m
-    => RecPipe i Void u m a
-    -> RecPipe i Void u m a
-    -> RecPipe i Void u m a
-altSink_ p q = FreeT $ go <$> runFreeT p <*> runFreeT q
-  where
-    go = \case
-      Pure x             -> \_ -> Pure x
-      Free (PAwaitF f g) -> \case
-        Pure x'              -> Pure x'
-        Free (PAwaitF f' g') -> Free $ PAwaitF (altSink_ <$> f <*> f') (altSink_ <$> g <*> g')
-        Free (PYieldF x' _ ) -> absurd x'
-      Free (PYieldF x _) -> absurd x
+--altSink_
+--    :: Monad m
+--    => RecPipe i Void u m a
+--    -> RecPipe i Void u m a
+--    -> RecPipe i Void u m a
+--altSink_ p q = FreeT $ go <$> runFreeT p <*> runFreeT q
+--  where
+--    go = \case
+--      Pure x             -> \_ -> Pure x
+--      Free (PAwaitF f g) -> \case
+--        Pure x'              -> Pure x'
+--        Free (PAwaitF f' g') -> Free $ PAwaitF (altSink_ <$> f <*> f') (altSink_ <$> g <*> g')
+--        Free (PYieldF x' _ ) -> absurd x'
+--      Free (PYieldF x _) -> absurd x
 
-zipSink
-    :: Monad m
-    => Pipe i Void u m (a -> b)
-    -> Pipe i Void u m a
-    -> Pipe i Void u m b
-zipSink (Pipe p) (Pipe q) = Pipe $ toFT $ zipSink_ (fromFT p) (fromFT q)
+--zipSink
+--    :: Monad m
+--    => Pipe i Void u m (a -> b)
+--    -> Pipe i Void u m a
+--    -> Pipe i Void u m b
+--zipSink (Pipe p) (Pipe q) = Pipe $ toFT $ zipSink_ (fromFT p) (fromFT q)
 
-altSink
-    :: Monad m
-    => Pipe i Void u m a
-    -> Pipe i Void u m a
-    -> Pipe i Void u m a
-altSink (Pipe p) (Pipe q) = Pipe $ toFT $ altSink_ (fromFT p) (fromFT q)
+--altSink
+--    :: Monad m
+--    => Pipe i Void u m a
+--    -> Pipe i Void u m a
+--    -> Pipe i Void u m a
+--altSink (Pipe p) (Pipe q) = Pipe $ toFT $ altSink_ (fromFT p) (fromFT q)
 
--- | '<*>' = distribute input to all, and return result when they finish
---
--- 'pure' = immediately finish
-instance Monad m => Applicative (ZipSink i u m) where
-    pure = ZipSink . pure
-    ZipSink p <*> ZipSink q = ZipSink $ zipSink p q
+---- | '<*>' = distribute input to all, and return result when they finish
+----
+---- 'pure' = immediately finish
+--instance Monad m => Applicative (ZipSink i u m) where
+--    pure = ZipSink . pure
+--    ZipSink p <*> ZipSink q = ZipSink $ zipSink p q
 
--- | '<|>' = distribute input to all, and return the first result that
--- finishes
---
--- 'empty' = never finish
-instance Monad m => Alternative (ZipSink i u m) where
-    empty = ZipSink go
-      where
-        go = forever await
-    ZipSink p <|> ZipSink q = ZipSink $ altSink p q
+---- | '<|>' = distribute input to all, and return the first result that
+---- finishes
+----
+---- 'empty' = never finish
+--instance Monad m => Alternative (ZipSink i u m) where
+--    empty = ZipSink go
+--      where
+--        go = forever await
+--    ZipSink p <|> ZipSink q = ZipSink $ altSink p q

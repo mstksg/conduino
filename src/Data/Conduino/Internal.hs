@@ -12,9 +12,11 @@
 module Data.Conduino.Internal (
     Pipe(..)
   , PipeF(..)
+  , PipeType(..), PTInput, PTOutput
   , awaitEither
   , yield
-  , trimapPipe, mapInput, mapOutput, mapUpRes
+  , trimapPipe
+  -- , mapInput, mapOutput, mapUpRes
   , RecPipe
   , toRecPipe, fromRecPipe
   -- , (.|)
@@ -63,6 +65,7 @@ type family PTOutput pt :: Type where
     PTOutput ('Sink    i  ) = Void
     PTOutput  'Effect       = Void
 
+
 -- | Similar to Conduit
 --
 -- *  @i@: Type of input stream
@@ -97,11 +100,11 @@ newtype Pipe (pt :: PipeType) u m a = Pipe { pipeFree :: FT (PipeF (PTInput pt) 
 
 -- | Await on upstream output.  Will block until it receives an @i@
 -- (expected input type) or a @u@ if the upstream pipe terminates.
-awaitEither :: (PTInput pt ~ i) => Pipe pt u m (Either u i)
+awaitEither :: Pipe pt u m (Either u (PTInput pt))
 awaitEither = Pipe pAwaitF
 
 -- | Send output downstream.
-yield :: (PTOutput pt ~ o) => o -> Pipe pt u m ()
+yield :: PTOutput pt -> Pipe pt u m ()
 yield = Pipe . pYieldF
 
 
@@ -145,19 +148,19 @@ trimapPipe f g h = Pipe . transFT go . pipeFree
 --mapUpRes :: (u -> v) -> Pipe i o v m a -> Pipe i o u m a
 --mapUpRes = trimapPipe id id
 
----- | A version of 'Pipe' that uses explicit, concrete recursion instead of
----- church-encoding like 'Pipe'.  Some functions --- especially ones that
----- combine multiple pipes into one --- are easier to implement in this
----- form.
---type RecPipe i o u = FreeT (PipeF i o u)
+-- | A version of 'Pipe' that uses explicit, concrete recursion instead of
+-- church-encoding like 'Pipe'.  Some functions --- especially ones that
+-- combine multiple pipes into one --- are easier to implement in this
+-- form.
+type RecPipe i o u = FreeT (PipeF i o u)
 
 
----- | Convert from a 'Pipe' to a 'RecPipe'.  While most of this library is
----- defined in terms of 'Pipe', it can be easier to write certain low-level
----- pipe combining functions in terms of 'RecPipe' than 'Pipe'.
---toRecPipe :: Monad m => Pipe i o u m a -> RecPipe i o u m a
---toRecPipe = fromFT . pipeFree
+-- | Convert from a 'Pipe' to a 'RecPipe'.  While most of this library is
+-- defined in terms of 'Pipe', it can be easier to write certain low-level
+-- pipe combining functions in terms of 'RecPipe' than 'Pipe'.
+toRecPipe :: Monad m => Pipe pt u m a -> RecPipe (PTInput pt) (PTOutput pt) u m a
+toRecPipe = fromFT . pipeFree
 
----- | Convert a 'RecPipe' back into a 'Pipe'.
---fromRecPipe :: Monad m => RecPipe i o u m a -> Pipe i o u m a
---fromRecPipe = Pipe . toFT
+-- | Convert a 'RecPipe' back into a 'Pipe'.
+fromRecPipe :: Monad m => RecPipe (PTInput pt) (PTOutput pt) u m a -> Pipe pt u m a
+fromRecPipe = Pipe . toFT
