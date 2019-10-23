@@ -24,16 +24,11 @@ module Data.Conduino.Internal (
   -- , ZipSink(..)
   ) where
 
-import           Control.Applicative
-import           Control.Monad
 import           Control.Monad.Free.Class
 import           Control.Monad.Free.TH
 import           Control.Monad.Trans.Class
-import           Control.Monad.Trans.Free        (FreeT(..), FreeF(..))
+import           Control.Monad.Trans.Free        (FreeT(..))
 import           Control.Monad.Trans.Free.Church
-import           Data.Coerce
-import           Data.Foldable
-import           Data.Void
 
 data PipeF i o u a =
       PAwaitF (u -> a) (i -> a)

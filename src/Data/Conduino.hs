@@ -16,13 +16,9 @@ module Data.Conduino (
 
 import           Control.Applicative
 import           Control.Monad
-import           Control.Monad.Free.Class
-import           Control.Monad.Free.TH
-import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Free        (FreeT(..), FreeF(..))
 import           Control.Monad.Trans.Free.Church
 import           Data.Conduino.Internal
-import           Data.Foldable
 import           Data.Void
 
 -- | Await input from upstream.  Will block until upstream 'yield's.
