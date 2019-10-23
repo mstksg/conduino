@@ -1,6 +1,7 @@
 {-# LANGUAGE AllowAmbiguousTypes        #-}
 {-# LANGUAGE DeriveFunctor              #-}
 {-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FunctionalDependencies     #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
@@ -13,7 +14,7 @@
 
 module Data.Conduino (
     Pipe
-  , type (.|)
+  -- , type (.|)
   , runPipe
   , awaitEither, await, awaitSurely, awaitForever, yield
   -- , mapInput, mapOutput, mapUpRes, trimapPipe
@@ -96,27 +97,20 @@ runPipe = iterT go . pipeFree . convertPipe @pt @'Effect
       PAwaitF _ f -> f ()
       PYieldF o _ -> absurd o
 
-type family pt .| qt where
-    Source o    .| Source    p = TypeError ('Text "Cannot chain anything into a source")
-    Source o    .| Conduit o p = Source p
-    Source o    .| Conduit j p = TypeError ('Text "Cannot chain source of " :<>: 'ShowType o :<>: 'Text " with a conduit expecting " :<>: 'ShowType j)
-    Source o    .| Sink    o   = Effect
-    Source o    .| Sink    p   = TypeError ('Text "Cannot chain source of " :<>: 'ShowType o :<>: 'Text " with a sink expecting " :<>: 'ShowType p)
-    Source p    .| Effect      = TypeError ('Text "Cannot chain anything into an effect")
-    Conduit i o .| Source  p   = TypeError ('Text "Cannot chain anything into a source")
-    Conduit i o .| Conduit o p = Conduit i p
-    Conduit i o .| Conduit q p = TypeError ('Text "Cannot chain conduit yielding " :<>: 'ShowType o :<>: 'Text " with a conduit expecting " :<>: 'ShowType q)
-    Conduit i o .| Sink    o   = Sink i
-    Conduit i o .| Sink    p   = TypeError ('Text "Cannot chain conduit yielding " :<>: 'ShowType o :<>: 'Text " with a sink expecting " :<>: 'ShowType p)
-    Conduit i o .| Effect      = TypeError ('Text "Cannot chain anything into an effect")
-    Sink    i   .| qt          = TypeError ('Text "Cannot chain a sink to anything after it.")
-    Effect      .| qt          = TypeError ('Text "Cannot chain an effect into anything after it.")
+class (PTOutput pt ~ PTInput qt, PTInput pt ~ PTInput (pt .| qt), PTOutput qt ~ PTOutput (pt .| qt)) => Pipeable pt qt where
+    type pt .| qt :: PipeType
 
-ptOutputSame :: PTOutput (pt .| qt) :~: PTOutput qt
-ptOutputSame = unsafeCoerce Refl
+instance Pipeable (Source a) (Conduit a b) where
+    type Source a .| Conduit a b = Source b
 
-ptInputSame :: PTInput (pt .| qt) :~: PTInput qt
-ptInputSame = unsafeCoerce Refl
+instance Pipeable (Source a) (Sink a) where
+    type Source a .| Sink a = Effect
+
+instance Pipeable (Conduit a b) (Sink b) where
+    type Conduit a b .| Sink b = Sink a
+
+instance Pipeable (Conduit a b) (Conduit b c) where
+    type Conduit a b .| Conduit b c = Conduit a c
 
 -- | The main operator for chaining pipes together.  @pipe1 .| pipe2@ will
 -- connect the output of @pipe1@ to the input of @pipe2@. 
@@ -137,15 +131,11 @@ ptInputSame = unsafeCoerce Refl
 -- Where you route a source into a series of pipes, which eventually ends
 -- up at a sink.  'runPipe' will then produce the result of that sink.
 (.|)
-    :: forall pt qt u m v r. Monad m
+    :: forall pt qt rt u m v r. (Pipeable pt qt, Monad m)
     => Pipe pt         u m v
     -> Pipe qt         v m r
     -> Pipe (pt .| qt) u m r
-Pipe p .| Pipe q = case ptOutputSame @pt @qt of
-  Refl -> case ptInputSame @pt @qt of
-    Refl -> Pipe $ toFT $ compPipe_ (fromFT p) (fromFT q)
-  -- where
-  --   Refl = ptOutputSame @pt @qt
+Pipe p .| Pipe q = Pipe $ toFT $ compPipe_ (fromFT p) (fromFT q)
 infixr 2 .|
 
 compPipe_
