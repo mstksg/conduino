@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
+{-# LANGUAGE RankNTypes                 #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TypeInType                 #-}
 
@@ -12,6 +13,9 @@ module Data.Conduino (
   , awaitEither, await, awaitSurely, awaitForever, yield
   , mapInput, mapOutput, mapUpRes, trimapPipe
   , ZipSource(..)
+  , runZipSource
+  -- , generalizeZipSource
+  , toListT, fromListT
   , ZipSink(..)
   , zipSink, altSink
   ) where
@@ -22,6 +26,7 @@ import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Free        (FreeT(..), FreeF(..))
 import           Control.Monad.Trans.Free.Church
+import           Data.Bifunctor
 import           Data.Conduino.Internal
 import           Data.Functor.Identity
 import           Data.Void
@@ -185,6 +190,50 @@ instance MonadIO m => MonadIO (ZipSource m) where
 
 instance MonadTrans ZipSource where
     lift = ZipSource . (yield =<<) . lift
+
+type LT m a = forall r. (Maybe (a, m r) -> m r) -> m r
+
+toLT :: Monad m => ListT m a -> LT m a
+toLT xs f = go xs
+  where
+    go (ListT ys) = f . (fmap . second) go =<< ys
+
+fromLT :: Monad m => LT m a -> ListT m a
+fromLT f = ListT $ f (pure . (fmap . second) ListT) 
+
+runZipSource :: Monad m => ZipSource m a -> LT m a
+runZipSource (ZipSource p) f = go (toRecPipe p)
+  where
+    go q = runFreeT q >>= \case
+      Pure _             -> f Nothing
+      Free (PAwaitF _ g) -> go . g $ ()
+      Free (PYieldF x y) -> f $ Just (x, go y)
+
+      -- (_ . (fmap . second) (`toLT` f)) =<< xs
+-- newtype ListT m a = ListT { unconsT :: m (Maybe (a, ListT m a)) }
+
+-- generalizeZipSource :: (MonadTrans t, MonadPlus (t m), Monad m) => ZipSource m a -> t m a
+-- generalizeZipSource = go . toRecPipe . hoistPipe lift . getZipSource
+--   where
+--     go p = runFreeT p >>= \case
+--       Pure _             -> empty
+--       Free (PAwaitF _ g) -> go (g ())
+--       Free (PYieldF x y) -> lift (pure x) <|> go y
+
+toListT :: forall m a. Monad m => ZipSource m a -> ListT m a
+toListT = go . toRecPipe . getZipSource
+  where
+    go p = ListT $ runFreeT p >>= \case
+      Pure _             -> pure Nothing
+      Free (PAwaitF _ g) -> unconsT . go $ g ()
+      Free (PYieldF x y) -> pure $ Just (x, go y)
+
+fromListT :: forall m a. Monad m => ListT m a -> ZipSource m a
+fromListT = ZipSource . fromRecPipe . go
+  where
+    go (ListT xs) = FreeT $ xs >>= \case
+      Nothing      -> pure . Pure $ ()
+      Just (y, ys) -> pure . Free $ PYieldF y (go ys)
 
 -- | A newtype wrapper over a sink (@'Pipe' i 'Void'@) that gives it an
 -- alternative 'Applicative' and 'Alternative' instance.
