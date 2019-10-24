@@ -16,17 +16,14 @@ module Data.Conduino.Internal (
   , hoistPipe
   , RecPipe
   , toRecPipe, fromRecPipe
-  , ListT(..)
   ) where
 
-import           Control.Applicative
 import           Control.Monad.Free.Class
 import           Control.Monad.Free.TH
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Free        (FreeT(..))
 import           Control.Monad.Trans.Free.Church
-import           Data.Functor
 
 -- | Base functor of 'Pipe'.
 data PipeF i o u a =
@@ -131,20 +128,3 @@ toRecPipe = fromFT . pipeFree
 -- | Convert a 'RecPipe' back into a 'Pipe'.
 fromRecPipe :: Monad m => RecPipe i o u m a -> Pipe i o u m a
 fromRecPipe = Pipe . toFT
-
-newtype ListT m a = ListT { unconsT :: m (Maybe (a, ListT m a)) } 
-  deriving Functor
-
-instance Monad m => Applicative (ListT m) where
-    pure x = ListT . pure $ Just (x, ListT (pure Nothing))
-    ListT xs <*> ListT ys = ListT $ xs >>= \case
-      Nothing       -> pure Nothing
-      Just (x, xs') -> ys <&> \case
-        Nothing       -> Nothing
-        Just (y, ys') -> Just (x y, xs' <*> ys')
-
-instance Monad m => Alternative (ListT m) where
-    empty = ListT $ pure Nothing
-    ListT xs <|> ListT ys = ListT $ xs >>= \case
-      Nothing       -> ys
-      Just (x, xs') -> pure $ Just (x, xs' <|> ListT ys)

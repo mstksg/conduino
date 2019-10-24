@@ -13,9 +13,7 @@ module Data.Conduino (
   , awaitEither, await, awaitSurely, awaitForever, yield
   , mapInput, mapOutput, mapUpRes, trimapPipe
   , ZipSource(..)
-  , runZipSource
-  -- , generalizeZipSource
-  , toListT, fromListT
+  , runZipSource, unconsZipSource
   , ZipSink(..)
   , zipSink, altSink
   ) where
@@ -26,7 +24,6 @@ import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Free        (FreeT(..), FreeF(..))
 import           Control.Monad.Trans.Free.Church
-import           Data.Bifunctor
 import           Data.Conduino.Internal
 import           Data.Functor.Identity
 import           Data.Void
@@ -145,8 +142,10 @@ compPipe_ p q = FreeT $ runFreeT q >>= \qq -> case qq of
 -- '<|>' will completely exhaust the first source before moving on to the
 -- next source.
 --
--- You can use this type with 'lift' to lift a yielding action and '<|>' to
--- sequence yields to implement the pattern described in
+-- 'ZipSource' is effectively equivalent to "ListT done right", the true
+-- List Monad transformer.  '<|>' is concatentation.  You can use this type
+-- with 'lift' to lift a yielding action and '<|>' to sequence yields to
+-- implement the pattern described in
 -- <http://www.haskellforall.com/2014/11/how-to-build-library-agnostic-streaming.html>,
 -- where you can write streaming producers in a polymorphic way, and have
 -- it run with pipes, conduit, etc.
@@ -191,17 +190,15 @@ instance MonadIO m => MonadIO (ZipSource m) where
 instance MonadTrans ZipSource where
     lift = ZipSource . (yield =<<) . lift
 
-type LT m a = forall r. (Maybe (a, m r) -> m r) -> m r
-
-toLT :: Monad m => ListT m a -> LT m a
-toLT xs f = go xs
-  where
-    go (ListT ys) = f . (fmap . second) go =<< ys
-
-fromLT :: Monad m => LT m a -> ListT m a
-fromLT f = ListT $ f (pure . (fmap . second) ListT) 
-
-runZipSource :: Monad m => ZipSource m a -> LT m a
+-- | A 'ZipSource' can be "run" by providing a way to handle and sequence each of its
+-- outputs.
+--
+-- This essentially converts 'ZipSource' into a church-encoded ListT.
+runZipSource
+    :: Monad m
+    => ZipSource m a
+    -> (Maybe (a, m r) -> m r)    -- ^ handler ('Nothing' = done, @'Just' (x, next)@ = yielded value and next action
+    -> m r
 runZipSource (ZipSource p) f = go (toRecPipe p)
   where
     go q = runFreeT q >>= \case
@@ -209,31 +206,19 @@ runZipSource (ZipSource p) f = go (toRecPipe p)
       Free (PAwaitF _ g) -> go . g $ ()
       Free (PYieldF x y) -> f $ Just (x, go y)
 
-      -- (_ . (fmap . second) (`toLT` f)) =<< xs
--- newtype ListT m a = ListT { unconsT :: m (Maybe (a, ListT m a)) }
-
--- generalizeZipSource :: (MonadTrans t, MonadPlus (t m), Monad m) => ZipSource m a -> t m a
--- generalizeZipSource = go . toRecPipe . hoistPipe lift . getZipSource
---   where
---     go p = runFreeT p >>= \case
---       Pure _             -> empty
---       Free (PAwaitF _ g) -> go (g ())
---       Free (PYieldF x y) -> lift (pure x) <|> go y
-
-toListT :: forall m a. Monad m => ZipSource m a -> ListT m a
-toListT = go . toRecPipe . getZipSource
+-- | 'ZipSource' is effectively ListT.  As such, you can use
+-- 'unconsZipSource' to "peel off" the first yielded item, if it exists,
+-- and return the "rest of the list".
+unconsZipSource
+    :: Monad m
+    => ZipSource m a
+    -> m (Maybe (a, ZipSource m a))
+unconsZipSource (ZipSource p) = go (toRecPipe p)
   where
-    go p = ListT $ runFreeT p >>= \case
+    go q = runFreeT q >>= \case
       Pure _             -> pure Nothing
-      Free (PAwaitF _ g) -> unconsT . go $ g ()
-      Free (PYieldF x y) -> pure $ Just (x, go y)
-
-fromListT :: forall m a. Monad m => ListT m a -> ZipSource m a
-fromListT = ZipSource . fromRecPipe . go
-  where
-    go (ListT xs) = FreeT $ xs >>= \case
-      Nothing      -> pure . Pure $ ()
-      Just (y, ys) -> pure . Free $ PYieldF y (go ys)
+      Free (PAwaitF _ g) -> go $ g ()
+      Free (PYieldF x y) -> pure $ Just (x, ZipSource . fromRecPipe $ y)
 
 -- | A newtype wrapper over a sink (@'Pipe' i 'Void'@) that gives it an
 -- alternative 'Applicative' and 'Alternative' instance.
