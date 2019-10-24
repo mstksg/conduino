@@ -39,7 +39,6 @@ import           Data.Conduino
 import           Data.Either
 import           Data.Foldable hiding      (foldr, foldl, fold)
 import           Data.Maybe
-import           Data.Void
 import           Prelude hiding            (map, iterate, mapM, replicate, repeat, foldr, drop, foldl)
 
 unfoldEither

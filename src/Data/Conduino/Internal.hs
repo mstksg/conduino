@@ -26,6 +26,7 @@ module Data.Conduino.Internal (
 
 import           Control.Monad.Free.Class
 import           Control.Monad.Free.TH
+import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Free        (FreeT(..))
 import           Control.Monad.Trans.Free.Church
@@ -67,6 +68,7 @@ newtype Pipe i o u m a = Pipe { pipeFree :: FT (PipeF i o u) m a }
            , Monad
            , MonadTrans
            , MonadFree (PipeF i o u)
+           , MonadIO
            )
 
 -- | Await on upstream output.  Will block until it receives an @i@
@@ -112,7 +114,6 @@ mapUpRes = trimapPipe id id
 -- combine multiple pipes into one --- are easier to implement in this
 -- form.
 type RecPipe i o u = FreeT (PipeF i o u)
-
 
 -- | Convert from a 'Pipe' to a 'RecPipe'.  While most of this library is
 -- defined in terms of 'Pipe', it can be easier to write certain low-level
