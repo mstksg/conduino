@@ -32,15 +32,17 @@ module Data.Conduino.Internal
 --   never yield anything else downstream.</li>
 --   <li>If a pipe is both a source and a sink, it is an
 --   <i>effect</i>.</li>
---   <li>Normally you can ask for input upstream with <tt>await</tt>, which
+--   <li>Normally you can ask for input upstream with <a>await</a>, which
 --   returns <a>Nothing</a> if the pipe upstream stops producing. However,
 --   if <tt>u</tt> is <a>Void</a>, it means that the pipe upstream will
---   never stop, so you can use <tt>awaitSurely</tt> to get a guaranteed
+--   never stop, so you can use <a>awaitSurely</a> to get a guaranteed
 --   answer.</li>
 --   </ul>
 newtype Pipe i o u m a
 Pipe :: FT (PipeF i o u) m a -> Pipe i o u m a
 [pipeFree] :: Pipe i o u m a -> FT (PipeF i o u) m a
+
+-- | Base functor of <a>Pipe</a>.
 data PipeF i o u a
 PAwaitF :: (u -> a) -> (i -> a) -> PipeF i o u a
 PYieldF :: o -> a -> PipeF i o u a
@@ -68,6 +70,9 @@ mapOutput :: (p -> o) -> Pipe i p u m a -> Pipe i o u m a
 -- | (Contravariantly) map over the upstream result type.
 mapUpRes :: (u -> v) -> Pipe i o v m a -> Pipe i o u m a
 
+-- | Transform the underlying monad of a pipe.
+hoistPipe :: (Monad m, Monad n) => (forall x. m x -> n x) -> Pipe i o u m a -> Pipe i o u n a
+
 -- | A version of <a>Pipe</a> that uses explicit, concrete recursion
 --   instead of church-encoding like <a>Pipe</a>. Some functions ---
 --   especially ones that combine multiple pipes into one --- are easier to
@@ -82,6 +87,7 @@ toRecPipe :: Monad m => Pipe i o u m a -> RecPipe i o u m a
 
 -- | Convert a <a>RecPipe</a> back into a <a>Pipe</a>.
 fromRecPipe :: Monad m => RecPipe i o u m a -> Pipe i o u m a
+instance Control.Monad.IO.Class.MonadIO m => Control.Monad.IO.Class.MonadIO (Data.Conduino.Internal.Pipe i o u m)
 instance Control.Monad.Free.Class.MonadFree (Data.Conduino.Internal.PipeF i o u) (Data.Conduino.Internal.Pipe i o u m)
 instance Control.Monad.Trans.Class.MonadTrans (Data.Conduino.Internal.Pipe i o u)
 instance GHC.Base.Monad (Data.Conduino.Internal.Pipe i o u m)
@@ -112,10 +118,10 @@ module Data.Conduino
 --   never yield anything else downstream.</li>
 --   <li>If a pipe is both a source and a sink, it is an
 --   <i>effect</i>.</li>
---   <li>Normally you can ask for input upstream with <tt>await</tt>, which
+--   <li>Normally you can ask for input upstream with <a>await</a>, which
 --   returns <a>Nothing</a> if the pipe upstream stops producing. However,
 --   if <tt>u</tt> is <a>Void</a>, it means that the pipe upstream will
---   never stop, so you can use <tt>awaitSurely</tt> to get a guaranteed
+--   never stop, so you can use <a>awaitSurely</a> to get a guaranteed
 --   answer.</li>
 --   </ul>
 data Pipe i o u m a
@@ -158,6 +164,10 @@ infixr 2 .|
 --   
 --   <a>runPipe</a> will produce the result of that sink.
 runPipe :: Monad m => Pipe () Void u m a -> m a
+
+-- | <a>runPipe</a> when the underlying monad is <a>Identity</a>, and so
+--   has no effects.
+runPipePure :: Pipe () Void u Identity a -> a
 
 -- | Await on upstream output. Will block until it receives an <tt>i</tt>
 --   (expected input type) or a <tt>u</tt> if the upstream pipe terminates.
@@ -206,6 +216,41 @@ mapUpRes :: (u -> v) -> Pipe i o v m a -> Pipe i o u m a
 --   If you want to map over the result type, use <a>fmap</a>.
 trimapPipe :: (i -> j) -> (p -> o) -> (u -> v) -> Pipe j p v m a -> Pipe i o u m a
 
+-- | A newtype wrapper over a source (<tt><a>Pipe</a> () o
+--   <a>Void</a></tt>) that gives it an alternative <a>Applicative</a> and
+--   <a>Alternative</a> instance.
+--   
+--   <a>&lt;*&gt;</a> will pair up each output that the sources produce: if
+--   you <a>await</a> a value from downstream, it will wait until both
+--   paired sources yield before passing them on together.
+--   
+--   <a>&lt;|&gt;</a> will completely exhaust the first source before
+--   moving on to the next source.
+--   
+--   <a>ZipSource</a> is effectively equivalent to "ListT done right", the
+--   true List Monad transformer. <a>&lt;|&gt;</a> is concatentation. You
+--   can use this type with <a>lift</a> to lift a yielding action and
+--   <a>&lt;|&gt;</a> to sequence yields to implement the pattern described
+--   in
+--   <a>http://www.haskellforall.com/2014/11/how-to-build-library-agnostic-streaming.html</a>,
+--   where you can write streaming producers in a polymorphic way, and have
+--   it run with pipes, conduit, etc.
+newtype ZipSource m a
+ZipSource :: Pipe () a Void m () -> ZipSource m a
+[getZipSource] :: ZipSource m a -> Pipe () a Void m ()
+
+-- | A <a>ZipSource</a> can be "run" by providing a way to handle and
+--   sequence each of its outputs.
+--   
+--   This effectively converts <a>ZipSource</a> into a church-encoded
+--   ListT.
+runZipSource :: Monad m => ZipSource m a -> (Maybe (a, m r) -> m r) -> m r
+
+-- | <a>ZipSource</a> is effectively ListT. As such, you can use
+--   <a>unconsZipSource</a> to "peel off" the first yielded item, if it
+--   exists, and return the "rest of the list".
+unconsZipSource :: Monad m => ZipSource m a -> m (Maybe (a, ZipSource m a))
+
 -- | A newtype wrapper over a sink (<tt><a>Pipe</a> i <a>Void</a></tt>)
 --   that gives it an alternative <a>Applicative</a> and <a>Alternative</a>
 --   instance.
@@ -218,28 +263,238 @@ trimapPipe :: (i -> j) -> (p -> o) -> (u -> v) -> Pipe j p v m a -> Pipe i o u m
 newtype ZipSink i u m a
 ZipSink :: Pipe i Void u m a -> ZipSink i u m a
 [getZipSink] :: ZipSink i u m a -> Pipe i Void u m a
+
+-- | Distribute input to both sinks, and finishes with the final result
+--   once both finish.
+--   
+--   Forms an identity with <a>pure</a>.
+zipSink :: Monad m => Pipe i Void u m (a -> b) -> Pipe i Void u m a -> Pipe i Void u m b
+
+-- | Distribute input to both sinks, and finishes with the result of the
+--   one that finishes first.
+altSink :: Monad m => Pipe i Void u m a -> Pipe i Void u m a -> Pipe i Void u m a
 instance GHC.Base.Functor (Data.Conduino.ZipSink i u m)
 instance GHC.Base.Monad m => GHC.Base.Applicative (Data.Conduino.ZipSink i u m)
 instance GHC.Base.Monad m => GHC.Base.Alternative (Data.Conduino.ZipSink i u m)
+instance Control.Monad.Trans.Class.MonadTrans (Data.Conduino.ZipSink i u)
+instance GHC.Base.Functor (Data.Conduino.ZipSource m)
+instance GHC.Base.Monad m => GHC.Base.Applicative (Data.Conduino.ZipSource m)
+instance GHC.Base.Monad m => GHC.Base.Alternative (Data.Conduino.ZipSource m)
+instance GHC.Base.Monad m => GHC.Base.Monad (Data.Conduino.ZipSource m)
+instance GHC.Base.Monad m => GHC.Base.MonadPlus (Data.Conduino.ZipSource m)
+instance Control.Monad.IO.Class.MonadIO m => Control.Monad.IO.Class.MonadIO (Data.Conduino.ZipSource m)
+instance Control.Monad.Trans.Class.MonadTrans Data.Conduino.ZipSource
 
 module Data.Conduino.Combinators
+
+-- | Repeatedly apply an "unfolding" function to a given initial state,
+--   yielding the first item in the tuple as output and updating the state
+--   as the second item in the tuple. Goes on forever. See
+--   <a>unfoldMaybe</a> for a version that stops.
 unfold :: (s -> (o, s)) -> s -> Pipe i o u m a
+
+-- | Repeatedly apply a function to a given starting value and yield each
+--   result forever.
+--   
+--   <pre>
+--   <a>runPipePure</a> $ <a>iterate</a> succ 0
+--              <a>.</a>| <a>take</a> 5
+--              .| <a>sinkList</a>
+--   
+--   -- [1,2,3,4,5]
+--   </pre>
+--   
+--   This doesn't yield the original starting value. However, you can yield
+--   it iterate after:
+--   
+--   <pre>
+--   <a>runPipePure</a> $ (<a>yield</a> 0 &gt;&gt; <a>iterate</a> succ 0)
+--              <a>.</a>| <a>take</a> 5
+--              .| <a>sinkList</a>
+--   
+--   -- [0,1,2,3,4,5]
+--   </pre>
 iterate :: (o -> o) -> o -> Pipe i o u m a
+
+-- | Repeatedly yield a given item forever.
 repeat :: o -> Pipe i o u m a
+
+-- | A version of <a>unfold</a> that can terminate and end by returning
+--   <a>Nothing</a>.
 unfoldMaybe :: (s -> Maybe (o, s)) -> s -> Pipe i o u m ()
+
+-- | A version of <a>unfoldMaybe</a> that can choose the "result" value by
+--   passing it in as <a>Left</a>.
 unfoldEither :: (s -> Either a (o, s)) -> s -> Pipe i o u m a
+
+-- | A version of <a>iterate</a> that can choose to terminate and stop by
+--   returning <a>Nothing</a>.
 iterateMaybe :: (o -> Maybe o) -> o -> Pipe i o u m ()
+
+-- | A version of <a>iterateMaybe</a> that can specify a result value by
+--   providing it in the <a>Left</a>.
 iterateEither :: (o -> Either a o) -> o -> Pipe i o u m a
+
+-- | Yield every item in a foldable container.
 sourceList :: Foldable t => t a -> Pipe i a u m ()
+
+-- | Yield a given item a certain number of times.
 replicate :: Int -> o -> Pipe i o u m ()
+
+-- | Repeat a monadic action forever, yielding each output.
+--   
+--   Remember that each item will only be "executed" when something
+--   downstream requests output.
 repeatM :: Monad m => m o -> Pipe i o u m a
+
+-- | Repeat a monadic action, yielding the item in the <a>Just</a> every
+--   time. As soon as it sees <a>Nothing</a>, stop producing forever.
+--   
+--   Remember that each item will only be "executed" when something
+--   downstream requests output.
 repeatMaybeM :: Monad m => m (Maybe o) -> Pipe i o u m ()
+
+-- | Like <a>repeatMaybeM</a>, but allow specification of a final result
+--   type.
 repeatEitherM :: Monad m => m (Either a o) -> Pipe i o u m a
+
+-- | Repeat a monadic action a given number of times, yielding each result,
+--   and then stop producing forever.
+--   
+--   Remember that each item will only be "executed" when something
+--   downstream requests output.
 replicateM :: Monad m => Int -> m o -> Pipe i o u m ()
-map :: (a -> b) -> Pipe a b u m u
-mapM :: Monad m => (a -> m b) -> Pipe a b u m u
+
+-- | Source from a given I/O handle, yielding each line drawn as a string.
+--   To draw raw bytes, use <a>sourceHandle</a>.
+--   
+--   This stop as soon as end-of-file is reached, or an empty line is seen.
+sourceHandleLines :: MonadIO m => Handle -> Pipe i String u m ()
+
+-- | Source from each line received from <a>stdin</a>. This stops as soon
+--   as end-of-file is reached, or an empty line is seen.
+stdinLines :: MonadIO m => Pipe i String u m ()
+
+-- | Source from a given I/O handle, yielding bytestrings as they are
+--   pulled. If you want to retrieve each line as a string, see
+--   <a>sourceHandleLines</a>.
+sourceHandle :: MonadIO m => Handle -> Pipe i ByteString u m ()
+
+-- | Source from stdin, yielding bytestrings as they are drawn. If you want
+--   to retrieve each line as a string, see <a>stdinLines</a>.
+stdin :: MonadIO m => Pipe i ByteString u m ()
+
+-- | Process every incoming item with a pure function, and yield its
+--   output.
+map :: (i -> o) -> Pipe i o u m u
+
+-- | Map a monadic function to process every input, and yield its output.
+mapM :: Monad m => (i -> m o) -> Pipe i o u m u
+
+-- | Let a given number of items pass through the stream uninhibited, and
+--   then stop producing forever.
+--   
+--   This is most useful if you sequence a second conduit after it.
+--   
+--   <pre>
+--   <a>runPipePure</a> $ <a>sourceList</a> [1..8]
+--              <a>.</a>| (do <a>take</a> 3 .| <a>map</a> (*2)         -- double the first 3 items
+--                     <a>map</a> negate                 -- negate the rest
+--                 )
+--              .| <a>sinkList</a>
+--   
+--   -- [2,4,6,-4,-5,-6,-7,-8]
+--   </pre>
+take :: Int -> Pipe i i u m ()
+
+-- | Let elements pass until an element is received that does not satisfy
+--   the predicate, then stop producing forever.
+--   
+--   Like <a>take</a>, is most useful if you sequence a second conduit
+--   after it.
+takeWhile :: (i -> Bool) -> Pipe i i u m ()
+
+-- | Only allow values satisfying a predicate to pass.
+filter :: (i -> Bool) -> Pipe i i u m u
+
+-- | Map a function returning a container onto every incoming item, and
+--   yield all of the outputs from that function.
+concatMap :: Foldable t => (i -> t o) -> Pipe i o u m u
+
+-- | Take an input of containers and output each of their elements
+--   successively.
+concat :: Foldable t => Pipe (t i) i u m u
+
+-- | Ignore a certain amount of items from the input stream, and then stop
+--   producing forever.
+--   
+--   This is most useful if you sequence a second consumer after it:
+--   
+--   <pre>
+--   <a>runPipePure</a> $ <a>sourceList</a> [1..8]
+--              <a>.|</a> (<a>drop</a> 3 &gt;&gt; <a>sinkList</a>)
+--   -- [4,5,6,7,8]
+--   </pre>
 drop :: Int -> Pipe i o u m ()
+
+-- | Ignore items from an input stream as long as they match a predicate.
+--   Afterwards, stop producing forever.
+--   
+--   Like for <a>drop</a>, is most useful of you sequence a second consumer
+--   after it.
+dropWhile :: (i -> Bool) -> Pipe i o u m ()
+
+-- | Right-fold every input into an accumulated value.
+--   
+--   Essentially this builds up a giant continuation that will be run all
+--   at once on the final result.
 foldr :: (a -> b -> b) -> b -> Pipe a o u m b
+
+-- | Left-fold every input into an accumulated value.
+--   
+--   Essentially this maintains a state and modifies that state with every
+--   input, using the given accumulating function.
 foldl :: (b -> a -> b) -> b -> Pipe a o u m b
-sinkList :: Pipe i o u m [i]
+
+-- | Fold every incoming item according to a monoidal projection, and
+--   return the result once finished.
+--   
+--   This can be used to implement many useful consumers, like ones that
+--   find the sum or the maximum item:
+--   
+--   <pre>
+--   sum :: Num i =&gt; Pipe i o u m i
+--   sum = getSum <a>$</a> foldMap Sum
+--   
+--   maximum :: Ord i =&gt; Pipe i o u m (Maybe i)
+--   maximum = fmap getMax <a>$</a> foldMap (Just . Max)
+--   </pre>
+foldMap :: Monoid a => (i -> a) -> Pipe i o u m a
+
+-- | Fold every incoming item monoidally, and return the result once
+--   finished.
 fold :: Monoid a => Pipe a o u m a
+
+-- | Consume an entire input stream and ignore all of its outputs.
+sinkNull :: Pipe i o u m ()
+
+-- | Sink every incoming item into a list.
+--   
+--   Note that this keeps the entire list in memory until it is all
+--   eventually read.
+sinkList :: Pipe i o u m [i]
+
+-- | Get the last item emitted by a stream.
+--   
+--   To get the first item ("head"), use <a>await</a> or
+--   <a>awaitSurely</a>.
+last :: Pipe i o u m (Maybe i)
+
+-- | Sink into a given I/O handle, writing each input to the handle.
+sinkHandle :: MonadIO m => Handle -> Pipe ByteString o u m ()
+
+-- | A sink into stdout.
+stdout :: MonadIO m => Pipe ByteString o u m ()
+
+-- | A sink into stderr.
+stderr :: MonadIO m => Pipe ByteString o u m ()
