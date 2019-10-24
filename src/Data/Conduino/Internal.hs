@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
+{-# LANGUAGE RankNTypes                 #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE TypeInType                 #-}
@@ -12,16 +13,9 @@ module Data.Conduino.Internal (
   , awaitEither
   , yield
   , trimapPipe, mapInput, mapOutput, mapUpRes
+  , hoistPipe
   , RecPipe
   , toRecPipe, fromRecPipe
-  -- , (.|)
-  -- , runPipe
-  -- , awaitEither, await, awaitSurely
-  -- , repeatM, unfoldP, unfoldPForever, iterateP, sourceList
-  -- , awaitForever, mapP, mapMP
-  -- , dropP
-  -- , foldrP, sinkList
-  -- , ZipSink(..)
   ) where
 
 import           Control.Monad.Free.Class
@@ -31,6 +25,7 @@ import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Free        (FreeT(..))
 import           Control.Monad.Trans.Free.Church
 
+-- | Base functor of 'Pipe'.
 data PipeF i o u a =
       PAwaitF (u -> a) (i -> a)
     | PYieldF o a
@@ -49,19 +44,20 @@ makeFree ''PipeF
 --
 -- Some specializations:
 --
--- *  A pipe is a /source/ if @i@ is '()': it doesn't need anything to go
---    pump out items.  If a pipe is source and @a@ is 'Void', it means that
---    it will produce forever.
+-- *  A pipe is a /source/ if @i@ is @()@: it doesn't need anything to go
+--    pump out items.  If a pipe is source and @a@ is 'Data.Void.Void', it
+--    means that it will produce forever.
 --
--- *  A pipe is a /sink/ if @o@ is 'Void': it will never yield anything
---    else downstream.
+-- *  A pipe is a /sink/ if @o@ is 'Void.Void': it will never yield
+--    anything else downstream.
 --
 -- *  If a pipe is both a source and a sink, it is an /effect/.
 --
--- *  Normally you can ask for input upstream with 'await', which returns
---    'Nothing' if the pipe upstream stops producing.  However, if @u@ is
---    'Void', it means that the pipe upstream will never stop, so you can
---    use 'awaitSurely' to get a guaranteed answer.
+-- *  Normally you can ask for input upstream with 'Data.Conduino.await',
+--    which returns 'Nothing' if the pipe upstream stops producing.
+--    However, if @u@ is 'Data.Void.Void', it means that the pipe upstream
+--    will never stop, so you can use 'Data.Conduino.awaitSurely' to get
+--    a guaranteed answer.
 newtype Pipe i o u m a = Pipe { pipeFree :: FT (PipeF i o u) m a }
   deriving ( Functor
            , Applicative
@@ -94,6 +90,14 @@ trimapPipe f g h = Pipe . transFT go . pipeFree
     go = \case
       PAwaitF a b -> PAwaitF (a . h) (b . f)
       PYieldF a x -> PYieldF (g a) x
+
+-- | Transform the underlying monad of a pipe.
+hoistPipe
+    :: (Monad m, Monad n)
+    => (forall x. m x -> n x)
+    -> Pipe i o u m a
+    -> Pipe i o u n a
+hoistPipe f = Pipe . hoistFT f . pipeFree
 
 -- | (Contravariantly) map over the expected input type.
 mapInput :: (i -> j) -> Pipe j o u m a -> Pipe i o u m a

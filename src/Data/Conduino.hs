@@ -8,17 +8,22 @@
 module Data.Conduino (
     Pipe
   , (.|)
-  , runPipe
+  , runPipe, runPipePure
   , awaitEither, await, awaitSurely, awaitForever, yield
   , mapInput, mapOutput, mapUpRes, trimapPipe
+  , ZipSource(..)
   , ZipSink(..)
+  , zipSink, altSink
   ) where
 
 import           Control.Applicative
 import           Control.Monad
+import           Control.Monad.IO.Class
+import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Free        (FreeT(..), FreeF(..))
 import           Control.Monad.Trans.Free.Church
 import           Data.Conduino.Internal
+import           Data.Functor.Identity
 import           Data.Void
 
 -- | Await input from upstream.  Will block until upstream 'yield's.
@@ -80,6 +85,11 @@ runPipe = iterT go . pipeFree
       PAwaitF _ f -> f ()
       PYieldF o _ -> absurd o
 
+-- | 'runPipe' when the underlying monad is 'Identity', and so has no
+-- effects.
+runPipePure :: Pipe () Void u Identity a -> a
+runPipePure = runIdentity . runPipe
+
 -- | The main operator for chaining pipes together.  @pipe1 .| pipe2@ will
 -- connect the output of @pipe1@ to the input of @pipe2@.
 --
@@ -113,14 +123,14 @@ compPipe_
     -> RecPipe a c u m r
 compPipe_ p q = FreeT $ runFreeT q >>= \qq -> case qq of
     Pure x             -> pure . Pure $ x
-    Free (PAwaitF f g) -> runFreeT p >>= \pp -> case pp of 
+    Free (PAwaitF f g) -> runFreeT p >>= \pp -> case pp of
       Pure x'              -> runFreeT $ compPipe_ (FreeT (pure pp)) (f x')
       Free (PAwaitF f' g') -> pure . Free $ PAwaitF ((`compPipe_` FreeT (pure qq)) . f')
                                                     ((`compPipe_` FreeT (pure qq)) . g')
       Free (PYieldF x' y') -> runFreeT $ compPipe_ y' (g x')
     Free (PYieldF x y) -> pure . Free $ PYieldF x (compPipe_ p y)
 
--- | A newtype wrapper over a source (@'Pipe' () 'o' 'Void'@) that gives it an
+-- | A newtype wrapper over a source (@'Pipe' () o 'Void'@) that gives it an
 -- alternative 'Applicative' and 'Alternative' instance.
 --
 -- '<*>' will pair up each output that the sources produce: if you 'await'
@@ -130,39 +140,51 @@ compPipe_ p q = FreeT $ runFreeT q >>= \qq -> case qq of
 -- '<|>' will completely exhaust the first source before moving on to the
 -- next source.
 --
--- This is similar to a ListT type: use 'lift' to lift up actions to yield,
--- as described in
+-- You can use this type with 'lift' to lift a yielding action and '<|>' to
+-- sequence yields to implement the pattern described in
 -- <http://www.haskellforall.com/2014/11/how-to-build-library-agnostic-streaming.html>,
--- and '<|>' to chain successive actions one after the other.
+-- where you can write streaming producers in a polymorphic way, and have
+-- it run with pipes, conduit, etc.
 newtype ZipSource m a = ZipSource { getZipSource :: Pipe () a Void m () }
 
-zipSource_
+bindSource_
     :: forall a b m. Monad m
-    => RecPipe () (a -> b) Void m ()
-    -> RecPipe () a        Void m ()
+    => RecPipe () a Void m ()
+    -> (a -> RecPipe () b Void m ())
     -> RecPipe () b        Void m ()
-zipSource_ p q = FreeT $ runFreeT p >>= \pp -> case pp of
+bindSource_ p fq = FreeT $ runFreeT p >>= \case
     Pure _             -> pure . Pure $ ()    -- choice to short-circuit?
-    Free (PAwaitF _ g) -> runFreeT $ g () `zipSource_` q
-    Free (PYieldF x y) -> runFreeT q >>= \case
+    Free (PAwaitF _ g) -> runFreeT $ g () `bindSource_` fq
+    Free (PYieldF x y) -> runFreeT (fq x) >>= \case
       Pure _               -> pure . Pure $ ()
-      Free (PAwaitF _  g') -> runFreeT $ FreeT (pure pp) `zipSource_` g' ()
-      Free (PYieldF x' y') -> pure . Free $ PYieldF (x x') (y `zipSource_` y')
+      Free (PAwaitF _  g') -> runFreeT $ y `bindSource_` const (g' ())
+      Free (PYieldF x' y') -> pure . Free $ PYieldF x' (y `bindSource_` const y')
 
 instance Functor (ZipSource m) where
     fmap f = ZipSource . mapOutput f . getZipSource
 
 instance Monad m => Applicative (ZipSource m) where
     pure = ZipSource . yield
-    ZipSource p <*> ZipSource q = ZipSource . fromRecPipe $
-      zipSource_ (toRecPipe p) (toRecPipe q)
+    (<*>) = ap
 
 instance Monad m => Alternative (ZipSource m) where
     empty = ZipSource $ pure ()
     ZipSource p <|> ZipSource q = ZipSource (p *> q)
 
+instance Monad m => Monad (ZipSource m) where
+    return = ZipSource . yield
+    ZipSource p >>= fq = ZipSource . fromRecPipe $
+      bindSource_ (toRecPipe p) (toRecPipe . getZipSource . fq)
 
+instance Monad m => MonadPlus (ZipSource m) where
+    mzero = empty
+    mplus = (<|>)
 
+instance MonadIO m => MonadIO (ZipSource m) where
+    liftIO = lift . liftIO
+
+instance MonadTrans ZipSource where
+    lift = ZipSource . (yield =<<) . lift
 
 -- | A newtype wrapper over a sink (@'Pipe' i 'Void'@) that gives it an
 -- alternative 'Applicative' and 'Alternative' instance.
@@ -195,7 +217,7 @@ zipSink_ p q = FreeT $ runFreeT p >>= \pp -> case pp of
         PAwaitF (zipSink_ <$> f <*> f') (zipSink_ <$> g <*> g')
       Free (PYieldF x' _ ) -> absurd x'
     Free (PYieldF x _) -> absurd x
-                                               
+
 altSink_
     :: Monad m
     => RecPipe i Void u m a
@@ -209,6 +231,10 @@ altSink_ p q = FreeT $ runFreeT p >>= \case
       Free (PYieldF x' _ ) -> absurd x'
     Free (PYieldF x _) -> absurd x
 
+-- | Distribute input to both sinks, and finishes with the final result
+-- once both finish.
+--
+-- Forms an identity with 'pure'.
 zipSink
     :: Monad m
     => Pipe i Void u m (a -> b)
@@ -216,6 +242,8 @@ zipSink
     -> Pipe i Void u m b
 zipSink (Pipe p) (Pipe q) = Pipe $ toFT $ zipSink_ (fromFT p) (fromFT q)
 
+-- | Distribute input to both sinks, and finishes with the result of
+-- the one that finishes first.
 altSink
     :: Monad m
     => Pipe i Void u m a
@@ -239,3 +267,7 @@ instance Monad m => Alternative (ZipSink i u m) where
       where
         go = forever await
     ZipSink p <|> ZipSink q = ZipSink $ altSink p q
+
+instance MonadTrans (ZipSink i u) where
+    lift = ZipSink . lift
+
