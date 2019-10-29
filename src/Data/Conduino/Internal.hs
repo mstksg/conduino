@@ -6,6 +6,7 @@
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE TypeInType                 #-}
+{-# LANGUAGE TypeOperators              #-}
 
 module Data.Conduino.Internal (
     Pipe(..)
@@ -16,14 +17,17 @@ module Data.Conduino.Internal (
   , hoistPipe
   , RecPipe
   , toRecPipe, fromRecPipe
+  , annotatePipeF
   ) where
 
 import           Control.Monad.Free.Class
+import           Control.Applicative
 import           Control.Monad.Free.TH
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Free        (FreeT(..))
 import           Control.Monad.Trans.Free.Church
+import           GHC.Generics
 
 -- | Base functor of 'Pipe'.
 data PipeF i o u a =
@@ -32,6 +36,14 @@ data PipeF i o u a =
   deriving Functor
 
 makeFree ''PipeF
+
+annotatePipeF :: PipeF i o u a -> (Const String :*: PipeF i o u) a
+annotatePipeF p = case p of
+    PAwaitF _ _ -> Const "PAwaitF" :*: p
+    PYieldF _ _ -> Const "PYieldF" :*: p
+
+  
+
 
 -- | Similar to Conduit
 --

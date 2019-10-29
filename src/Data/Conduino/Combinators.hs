@@ -1,5 +1,6 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE LambdaCase   #-}
+{-# LANGUAGE RankNTypes   #-}
 
 module Data.Conduino.Combinators (
   -- * Sources
@@ -29,6 +30,8 @@ module Data.Conduino.Combinators (
   -- * Pipes
   , map
   , mapM
+  , scan
+  , mapAccum
   , take
   , takeWhile
   , filter
@@ -267,6 +270,38 @@ map f = awaitForever (yield . f)
 mapM :: Monad m => (i -> m o) -> Pipe i o u m u
 mapM f = awaitForever ((yield =<<) . lift . f)
 
+-- | Map a pure "stateful" function over each incoming item.  Give
+-- a function to update the state and return an output and an initial
+-- state.
+mapAccum
+    :: (i -> s -> (s, o))       -- ^ update state and output
+    -> s                        -- ^ initial state
+    -> Pipe i o u m u
+mapAccum f = go
+  where
+    go !x = awaitWith $ \y ->
+        let (!x', !z) = f y x
+        in  yield z *> go x'
+
+-- | Like 'foldl', but yields every accumulator value downstream.
+--
+-- @
+-- 'runPipePure' $ 'sourceList' [1..10]
+--            .| 'scan' (+) 0
+--            .| 'sinkList'
+--
+-- -- [1,3,6,10,15,21,28,36,45,55]
+-- @
+scan
+    :: (o -> i -> o)
+    -> o
+    -> Pipe i o u m u
+scan f = go
+  where
+    go !x = awaitWith $ \y ->
+      let x' = f x y
+      in  yield x' *> go x'
+    
 -- | Let a given number of items pass through the stream uninhibited, and
 -- then stop producing forever.
 --

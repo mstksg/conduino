@@ -33,6 +33,7 @@ library:
   - free
   - transformers
   - bytestring
+  - list-transformer
 
 # executables:
 #   conduino-exe:

@@ -2,31 +2,40 @@
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
+{-# LANGUAGE PatternSynonyms            #-}
 {-# LANGUAGE RankNTypes                 #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TypeInType                 #-}
+{-# LANGUAGE ViewPatterns               #-}
 
 module Data.Conduino (
     Pipe
   , (.|)
   , runPipe, runPipePure
-  , awaitEither, await, awaitSurely, awaitForever, yield
+  , awaitEither, await, awaitWith, awaitSurely, awaitForever, yield
   , mapInput, mapOutput, mapUpRes, trimapPipe
+  -- * Wrappers
   , ZipSource(..)
-  , runZipSource, unconsZipSource
+  , unconsZipSource
   , ZipSink(..)
   , zipSink, altSink
+  -- * Generators
+  , toListT, fromListT
+  , pattern PipeList
+  , withSource, genSource
   ) where
 
 import           Control.Applicative
 import           Control.Monad
-import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Free        (FreeT(..), FreeF(..))
 import           Control.Monad.Trans.Free.Church
 import           Data.Conduino.Internal
+import           Data.Functor
 import           Data.Functor.Identity
 import           Data.Void
+import           List.Transformer                (ListT(..), Step(..))
+import qualified List.Transformer                as LT
 
 -- | Await input from upstream.  Will block until upstream 'yield's.
 --
@@ -34,8 +43,19 @@ import           Data.Void
 --
 -- If the upstream pipe never terminates, then you can use 'awaitSurely' to
 -- guarantee a result.
+--
+-- Will always return 'Just' if @u@ is 'Void'.
 await :: Pipe i o u m (Maybe i)
 await = either (const Nothing) Just <$> awaitEither
+
+-- | 'await', but directly chaining a continuation if the 'await' was
+-- succesful.
+--
+-- The await will always be succesful if @u@ is 'Void'.
+awaitWith :: (i -> Pipe i o u m u) -> Pipe i o u m u
+awaitWith f = awaitEither >>= \case
+    Left  r -> pure r
+    Right x -> f x
 
 -- | Await input from upstream where the upstream pipe is guaranteed to
 -- never terminate.
@@ -75,12 +95,12 @@ awaitForeverWith f g = go
 -- @
 -- 'runPipe' $ someSource
 --        '.|' somePipe
---        '.|' someOtherPipe
---        '.|' someSink
+--        .| someOtherPipe
+--        .| someSink
 -- @
 --
--- 'runPipe' will produce the result of that sink.
-runPipe :: Monad m => Pipe () Void u m a -> m a
+-- 'runPipe' will produce the result of that final sink.
+runPipe :: Monad m => Pipe () Void Void m a -> m a
 runPipe = iterT go . pipeFree
   where
     go = \case
@@ -89,7 +109,7 @@ runPipe = iterT go . pipeFree
 
 -- | 'runPipe' when the underlying monad is 'Identity', and so has no
 -- effects.
-runPipePure :: Pipe () Void u Identity a -> a
+runPipePure :: Pipe () Void Void Identity a -> a
 runPipePure = runIdentity . runPipe
 
 -- | The main operator for chaining pipes together.  @pipe1 .| pipe2@ will
@@ -104,8 +124,8 @@ runPipePure = runIdentity . runPipe
 -- @
 -- 'runPipe' $ someSource
 --        '.|' somePipe
---        '.|' someOtherPipe
---        '.|' someSink
+--        .| someOtherPipe
+--        .| someSink
 -- @
 --
 -- Where you route a source into a series of pipes, which eventually ends
@@ -133,7 +153,8 @@ compPipe_ p q = FreeT $ runFreeT q >>= \qq -> case qq of
     Free (PYieldF x y) -> pure . Free $ PYieldF x (compPipe_ p y)
 
 -- | A newtype wrapper over a source (@'Pipe' () o 'Void'@) that gives it an
--- alternative 'Applicative' and 'Alternative' instance.
+-- alternative 'Applicative' and 'Alternative' instance, matching "ListT
+-- done right".
 --
 -- '<*>' will pair up each output that the sources produce: if you 'await'
 -- a value from downstream, it will wait until both paired sources yield
@@ -149,76 +170,131 @@ compPipe_ p q = FreeT $ runFreeT q >>= \qq -> case qq of
 -- <http://www.haskellforall.com/2014/11/how-to-build-library-agnostic-streaming.html>,
 -- where you can write streaming producers in a polymorphic way, and have
 -- it run with pipes, conduit, etc.
+--
+-- The main difference is that its 'Applicative' instance ("zipping") is
+-- different from the traditional 'Applicative' instance for 'ListT'
+-- ("all combinations").  Effectively this becomes like a "zipping"
+-- 'Applicative' instance for 'ListT'.
+--
+-- If you want a 'Monad' (or 'MonadIO') instance, use 'ListT' instead, and
+-- convert using 'toListT'/'fromListT' or the 'PipeList'
+-- pattern/constructor.
 newtype ZipSource m a = ZipSource { getZipSource :: Pipe () a Void m () }
 
-bindSource_
-    :: forall a b m. Monad m
-    => RecPipe () a Void m ()
-    -> (a -> RecPipe () b Void m ())
-    -> RecPipe () b        Void m ()
-bindSource_ p fq = FreeT $ runFreeT p >>= \case
-    Pure _             -> pure . Pure $ ()    -- choice to short-circuit?
-    Free (PAwaitF _ g) -> runFreeT $ g () `bindSource_` fq
-    Free (PYieldF x y) -> runFreeT (fq x) >>= \case
-      Pure _               -> pure . Pure $ ()
-      Free (PAwaitF _  g') -> runFreeT $ y `bindSource_` const (g' ())
-      Free (PYieldF x' y') -> pure . Free $ PYieldF x' (y `bindSource_` const y')
+-- | A source is equivalent to a 'ListT' producing a 'Maybe'; this pattern
+-- synonym lets you treat it as such.  It essentialyl wraps over 'toListT'
+-- and 'fromListT'.
+pattern PipeList :: Monad m => ListT m (Maybe a) -> Pipe () a u m ()
+pattern PipeList xs <- (toListT->xs)
+  where
+    PipeList xs = fromListT xs
+{-# COMPLETE PipeList #-}
 
 instance Functor (ZipSource m) where
     fmap f = ZipSource . mapOutput f . getZipSource
 
 instance Monad m => Applicative (ZipSource m) where
     pure = ZipSource . yield
-    (<*>) = ap
+    ZipSource (PipeList fs) <*> ZipSource (PipeList xs) = ZipSource . PipeList . fmap Just $
+            uncurry ($)
+        <$> LT.zip (concatListT fs) (concatListT xs)
+
+concatListT :: Monad m => ListT m (Maybe a) -> ListT m a
+concatListT xs = ListT $ next xs >>= \case
+    Nil              -> pure Nil
+    Cons Nothing  ys -> next (concatListT ys)
+    Cons (Just y) ys -> pure $ Cons y (concatListT ys)
 
 instance Monad m => Alternative (ZipSource m) where
     empty = ZipSource $ pure ()
     ZipSource p <|> ZipSource q = ZipSource (p *> q)
 
-instance Monad m => Monad (ZipSource m) where
-    return = ZipSource . yield
-    ZipSource p >>= fq = ZipSource . fromRecPipe $
-      bindSource_ (toRecPipe p) (toRecPipe . getZipSource . fq)
-
-instance Monad m => MonadPlus (ZipSource m) where
-    mzero = empty
-    mplus = (<|>)
-
-instance MonadIO m => MonadIO (ZipSource m) where
-    liftIO = lift . liftIO
-
 instance MonadTrans ZipSource where
     lift = ZipSource . (yield =<<) . lift
 
--- | A 'ZipSource' can be "run" by providing a way to handle and sequence each of its
--- outputs.
+-- | A source is essentially equivalent to 'ListT' producing a 'Maybe'
+-- result.  This converts it to the 'ListT' it encodes.
 --
--- This essentially converts 'ZipSource' into a church-encoded ListT.
-runZipSource
-    :: Monad m
-    => ZipSource m a
-    -> (Maybe (a, m r) -> m r)    -- ^ handler ('Nothing' = done, @'Just' (x, next)@ = yielded value and next action
-    -> m r
-runZipSource (ZipSource p) f = go (toRecPipe p)
-  where
-    go q = runFreeT q >>= \case
-      Pure _             -> f Nothing
-      Free (PAwaitF _ g) -> go . g $ ()
-      Free (PYieldF x y) -> f $ Just (x, go y)
+-- See 'ZipSource' for a wrapper over 'Pipe' that gives the right 'Functor'
+-- and 'Alternative' instances.
+toListT
+    :: Applicative m
+    => Pipe () o u m ()
+    -> ListT m (Maybe o)
+toListT p = ListT $ runFT (pipeFree p)
+    (\_ -> pure Nil)
+    (\pNext -> \case
+        PAwaitF _ g -> pure $ Cons Nothing  (ListT . pNext $ g ())
+        PYieldF x y -> pure $ Cons (Just x) (ListT . pNext $ y   )
+    )
 
--- | 'ZipSource' is effectively ListT.  As such, you can use
--- 'unconsZipSource' to "peel off" the first yielded item, if it exists,
--- and return the "rest of the list".
+-- | A source is essentially 'ListT' producing a 'Maybe' result.  This
+-- converts a 'ListT' to the source it encodes.
+--
+-- See 'ZipSource' for a wrapper over 'Pipe' that gives the right 'Functor'
+-- and 'Alternative' instances.
+fromListT
+    :: Monad m
+    => ListT m (Maybe o)
+    -> Pipe i o u m ()
+fromListT = fromRecPipe . go
+  where
+    go xs = FreeT $ next xs >>= \case
+      Nil              -> pure . Pure $ ()
+      Cons Nothing  ys -> pure . Free $ PAwaitF (\_ -> pure ()) $ \_ -> go ys
+      Cons (Just y) ys -> pure . Free $ PYieldF y (go ys)
+
+---- | A source is essentially equiavlent to 'ListT'.  This converts
+---- a 'ListT' to the source it encodes.
+----
+---- See 'ZipSource' for a wrapper over 'Pipe' that gives the right 'Functor'
+---- and 'Alternative' instances.
+--fromListT
+--    :: Monad m
+--    => ListT m o
+--    -> Pipe i o u m ()
+--fromListT = fromRecPipe . go
+--  where
+--    go xs = FreeT $ next xs >>= \case
+--      Nil       -> pure . Pure $ ()
+--      Cons y ys -> pure . Free $ PYieldF y (go ys)
+
+-- | Given a "generator" of @o@ in @m@, return a /source/ that that
+-- generator encodes.  Is the inverse of 'withSource'.
+--
+-- The generator is essentially a church-encoded 'ListT'.
+genSource
+    :: (forall r. (Maybe (o, m r) -> m r) -> m r)
+    -> Pipe i o u m ()
+genSource f = Pipe $ FT $ \pDone pFree -> f $ \case
+    Nothing      -> pDone ()
+    Just (x, xs) -> pFree id (PYieldF x xs)
+
+-- | A source can be "run" by providing a continuation to handle and
+-- sequence each of its outputs.  Is ths inverse of 'genSource'.
+--
+-- This essentially turns a pipe into a church-encoded 'ListT'.
+withSource
+    :: Pipe () o u m ()
+    -> (Maybe (o, m r) -> m r)    -- ^ handler ('Nothing' = done, @'Just' (x, next)@ = yielded value and next action
+    -> m r
+withSource p f = runFT (pipeFree p)
+    (\_ -> f Nothing)
+    (\pNext -> \case
+        PAwaitF _ g -> pNext $ g ()
+        PYieldF x y -> f (Just (x, pNext y))
+    )
+
+-- | 'ZipSource' is effectively 'ListT' returning a 'Maybe'.  As such, you
+-- can use 'unconsZipSource' to "peel off" the first yielded item, if it
+-- exists, and return the "rest of the list".
 unconsZipSource
     :: Monad m
     => ZipSource m a
-    -> m (Maybe (a, ZipSource m a))
-unconsZipSource (ZipSource p) = go (toRecPipe p)
-  where
-    go q = runFreeT q >>= \case
-      Pure _             -> pure Nothing
-      Free (PAwaitF _ g) -> go $ g ()
-      Free (PYieldF x y) -> pure $ Just (x, ZipSource . fromRecPipe $ y)
+    -> m (Maybe (Maybe a, ZipSource m a))
+unconsZipSource (ZipSource (PipeList p)) = next p <&> \case
+    Cons x xs -> Just (x, ZipSource (PipeList xs))
+    Nil       -> Nothing
 
 -- | A newtype wrapper over a sink (@'Pipe' i 'Void'@) that gives it an
 -- alternative 'Applicative' and 'Alternative' instance.
@@ -304,4 +380,3 @@ instance Monad m => Alternative (ZipSink i u m) where
 
 instance MonadTrans (ZipSink i u) where
     lift = ZipSink . lift
-
