@@ -87,6 +87,7 @@ toRecPipe :: Monad m => Pipe i o u m a -> RecPipe i o u m a
 
 -- | Convert a <a>RecPipe</a> back into a <a>Pipe</a>.
 fromRecPipe :: Monad m => RecPipe i o u m a -> Pipe i o u m a
+annotatePipeF :: PipeF i o u a -> (Const String :*: PipeF i o u) a
 instance Control.Monad.IO.Class.MonadIO m => Control.Monad.IO.Class.MonadIO (Data.Conduino.Internal.Pipe i o u m)
 instance Control.Monad.Free.Class.MonadFree (Data.Conduino.Internal.PipeF i o u) (Data.Conduino.Internal.Pipe i o u m)
 instance Control.Monad.Trans.Class.MonadTrans (Data.Conduino.Internal.Pipe i o u)
@@ -140,8 +141,8 @@ data Pipe i o u m a
 --   <pre>
 --   <a>runPipe</a> $ someSource
 --          <a>.|</a> somePipe
---          <a>.|</a> someOtherPipe
---          <a>.|</a> someSink
+--          .| someOtherPipe
+--          .| someSink
 --   </pre>
 --   
 --   Where you route a source into a series of pipes, which eventually ends
@@ -158,16 +159,16 @@ infixr 2 .|
 --   <pre>
 --   <a>runPipe</a> $ someSource
 --          <a>.|</a> somePipe
---          <a>.|</a> someOtherPipe
---          <a>.|</a> someSink
+--          .| someOtherPipe
+--          .| someSink
 --   </pre>
 --   
---   <a>runPipe</a> will produce the result of that sink.
-runPipe :: Monad m => Pipe () Void u m a -> m a
+--   <a>runPipe</a> will produce the result of that final sink.
+runPipe :: Monad m => Pipe () Void Void m a -> m a
 
 -- | <a>runPipe</a> when the underlying monad is <a>Identity</a>, and so
 --   has no effects.
-runPipePure :: Pipe () Void u Identity a -> a
+runPipePure :: Pipe () Void Void Identity a -> a
 
 -- | Await on upstream output. Will block until it receives an <tt>i</tt>
 --   (expected input type) or a <tt>u</tt> if the upstream pipe terminates.
@@ -180,7 +181,15 @@ awaitEither :: Pipe i o u m (Either u i)
 --   
 --   If the upstream pipe never terminates, then you can use
 --   <a>awaitSurely</a> to guarantee a result.
+--   
+--   Will always return <a>Just</a> if <tt>u</tt> is <a>Void</a>.
 await :: Pipe i o u m (Maybe i)
+
+-- | <a>await</a>, but directly chaining a continuation if the <a>await</a>
+--   was succesful.
+--   
+--   The await will always be succesful if <tt>u</tt> is <a>Void</a>.
+awaitWith :: (i -> Pipe i o u m u) -> Pipe i o u m u
 
 -- | Await input from upstream where the upstream pipe is guaranteed to
 --   never terminate.
@@ -218,7 +227,7 @@ trimapPipe :: (i -> j) -> (p -> o) -> (u -> v) -> Pipe j p v m a -> Pipe i o u m
 
 -- | A newtype wrapper over a source (<tt><a>Pipe</a> () o
 --   <a>Void</a></tt>) that gives it an alternative <a>Applicative</a> and
---   <a>Alternative</a> instance.
+--   <a>Alternative</a> instance, matching "ListT done right".
 --   
 --   <a>&lt;*&gt;</a> will pair up each output that the sources produce: if
 --   you <a>await</a> a value from downstream, it will wait until both
@@ -235,21 +244,24 @@ trimapPipe :: (i -> j) -> (p -> o) -> (u -> v) -> Pipe j p v m a -> Pipe i o u m
 --   <a>http://www.haskellforall.com/2014/11/how-to-build-library-agnostic-streaming.html</a>,
 --   where you can write streaming producers in a polymorphic way, and have
 --   it run with pipes, conduit, etc.
+--   
+--   The main difference is that its <a>Applicative</a> instance
+--   ("zipping") is different from the traditional <a>Applicative</a>
+--   instance for <a>ListT</a> ("all combinations"). Effectively this
+--   becomes like a "zipping" <a>Applicative</a> instance for <a>ListT</a>.
+--   
+--   If you want a <a>Monad</a> (or <tt>MonadIO</tt>) instance, use
+--   <a>ListT</a> instead, and convert using
+--   <a>toListT</a>/<a>fromListT</a> or the <a>PipeList</a>
+--   pattern/constructor.
 newtype ZipSource m a
 ZipSource :: Pipe () a Void m () -> ZipSource m a
 [getZipSource] :: ZipSource m a -> Pipe () a Void m ()
 
--- | A <a>ZipSource</a> can be "run" by providing a way to handle and
---   sequence each of its outputs.
---   
---   This effectively converts <a>ZipSource</a> into a church-encoded
---   ListT.
-runZipSource :: Monad m => ZipSource m a -> (Maybe (a, m r) -> m r) -> m r
-
--- | <a>ZipSource</a> is effectively ListT. As such, you can use
---   <a>unconsZipSource</a> to "peel off" the first yielded item, if it
---   exists, and return the "rest of the list".
-unconsZipSource :: Monad m => ZipSource m a -> m (Maybe (a, ZipSource m a))
+-- | <a>ZipSource</a> is effectively <a>ListT</a> returning a <a>Maybe</a>.
+--   As such, you can use <a>unconsZipSource</a> to "peel off" the first
+--   yielded item, if it exists, and return the "rest of the list".
+unconsZipSource :: Monad m => ZipSource m a -> m (Maybe (Maybe a, ZipSource m a))
 
 -- | A newtype wrapper over a sink (<tt><a>Pipe</a> i <a>Void</a></tt>)
 --   that gives it an alternative <a>Applicative</a> and <a>Alternative</a>
@@ -273,6 +285,38 @@ zipSink :: Monad m => Pipe i Void u m (a -> b) -> Pipe i Void u m a -> Pipe i Vo
 -- | Distribute input to both sinks, and finishes with the result of the
 --   one that finishes first.
 altSink :: Monad m => Pipe i Void u m a -> Pipe i Void u m a -> Pipe i Void u m a
+
+-- | A source is essentially equivalent to <a>ListT</a> producing a
+--   <a>Maybe</a> result. This converts it to the <a>ListT</a> it encodes.
+--   
+--   See <a>ZipSource</a> for a wrapper over <a>Pipe</a> that gives the
+--   right <a>Functor</a> and <a>Alternative</a> instances.
+toListT :: Applicative m => Pipe () o u m () -> ListT m (Maybe o)
+
+-- | A source is essentially <a>ListT</a> producing a <a>Maybe</a> result.
+--   This converts a <a>ListT</a> to the source it encodes.
+--   
+--   See <a>ZipSource</a> for a wrapper over <a>Pipe</a> that gives the
+--   right <a>Functor</a> and <a>Alternative</a> instances.
+fromListT :: Monad m => ListT m (Maybe o) -> Pipe i o u m ()
+
+-- | A source is equivalent to a <a>ListT</a> producing a <a>Maybe</a>;
+--   this pattern synonym lets you treat it as such. It essentialyl wraps
+--   over <a>toListT</a> and <a>fromListT</a>.
+pattern PipeList :: Monad m => ListT m (Maybe a) -> Pipe () a u m ()
+
+-- | A source can be "run" by providing a continuation to handle and
+--   sequence each of its outputs. Is ths inverse of <a>genSource</a>.
+--   
+--   This essentially turns a pipe into a church-encoded <a>ListT</a>.
+withSource :: Pipe () o u m () -> (Maybe (o, m r) -> m r) -> m r
+
+-- | Given a "generator" of <tt>o</tt> in <tt>m</tt>, return a
+--   <i>source</i> that that generator encodes. Is the inverse of
+--   <a>withSource</a>.
+--   
+--   The generator is essentially a church-encoded <a>ListT</a>.
+genSource :: (forall r. (Maybe (o, m r) -> m r) -> m r) -> Pipe i o u m ()
 instance GHC.Base.Functor (Data.Conduino.ZipSink i u m)
 instance GHC.Base.Monad m => GHC.Base.Applicative (Data.Conduino.ZipSink i u m)
 instance GHC.Base.Monad m => GHC.Base.Alternative (Data.Conduino.ZipSink i u m)
@@ -280,9 +324,6 @@ instance Control.Monad.Trans.Class.MonadTrans (Data.Conduino.ZipSink i u)
 instance GHC.Base.Functor (Data.Conduino.ZipSource m)
 instance GHC.Base.Monad m => GHC.Base.Applicative (Data.Conduino.ZipSource m)
 instance GHC.Base.Monad m => GHC.Base.Alternative (Data.Conduino.ZipSource m)
-instance GHC.Base.Monad m => GHC.Base.Monad (Data.Conduino.ZipSource m)
-instance GHC.Base.Monad m => GHC.Base.MonadPlus (Data.Conduino.ZipSource m)
-instance Control.Monad.IO.Class.MonadIO m => Control.Monad.IO.Class.MonadIO (Data.Conduino.ZipSource m)
 instance Control.Monad.Trans.Class.MonadTrans Data.Conduino.ZipSource
 
 module Data.Conduino.Combinators
@@ -390,6 +431,22 @@ map :: (i -> o) -> Pipe i o u m u
 
 -- | Map a monadic function to process every input, and yield its output.
 mapM :: Monad m => (i -> m o) -> Pipe i o u m u
+
+-- | Like <a>foldl</a>, but yields every accumulator value downstream.
+--   
+--   <pre>
+--   <a>runPipePure</a> $ <a>sourceList</a> [1..10]
+--              .| <a>scan</a> (+) 0
+--              .| <a>sinkList</a>
+--   
+--   -- [1,3,6,10,15,21,28,36,45,55]
+--   </pre>
+scan :: (o -> i -> o) -> o -> Pipe i o u m u
+
+-- | Map a pure "stateful" function over each incoming item. Give a
+--   function to update the state and return an output and an initial
+--   state.
+mapAccum :: (i -> s -> (s, o)) -> s -> Pipe i o u m u
 
 -- | Let a given number of items pass through the stream uninhibited, and
 --   then stop producing forever.
