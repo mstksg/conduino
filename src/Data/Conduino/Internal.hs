@@ -67,29 +67,36 @@ makeFree ''PipeF
 --
 -- For a @'Pipe' i o u m a@, you have:
 --
--- *  @i@: Type of input stream
--- *  @o@: Type of output stream
+-- *  @i@: Type of input stream (the things you can 'Data.Conduino.await')
+-- *  @o@: Type of output stream (the things you 'yield')
 -- *  @u@: Type of the /result/ of the upstream pipe (Outputted when
---    upstream pipe finishes)
--- *  @m@: Underlying monad
--- *  @a@: Result type (Outputted when finished)
+--    upstream pipe terminates)
+-- *  @m@: Underlying monad (the things you can 'lift')
+-- *  @a@: Result type when pipe terminates (outputted when finished, with
+--    'pure' or 'return')
 --
 -- Some specializations:
 --
--- *  A pipe is a /source/ if @i@ is @()@: it doesn't need anything to go
---    pump out items.  If a pipe is source and @a@ is 'Data.Void.Void', it
---    means that it will produce forever.
+-- *  If @i@ is @()@, the pipe is a /source/ --- it doesn't need anything
+--    to produce items.  It will pump out items on its own, for pipes
+--    downstream to receive and process.
 --
--- *  A pipe is a /sink/ if @o@ is 'Void.Void': it will never yield
---    anything else downstream.
+-- *  If @o@ is 'Void'@, the pipe is a /sink/ --- it will never 'yield'
+--    anything downstream.  It will consume items from things upstream, and
+--    produce a result (@a@) if and when it terminates.
 --
--- *  If a pipe is both a source and a sink, it is an /effect/.
+-- *  If @u@ is 'Void', then the pipe's upstream is limitless, and never
+--    terminates.  This means that you can use 'Data.Condunio.awaitSurely'
+--    instead of 'Data.Conduino.await', to get await a value that is
+--    guaranteed to come.  You'll get an @i@ instead of a @'Maybe' i@.
 --
--- *  Normally you can ask for input upstream with 'Data.Conduino.await',
---    which returns 'Nothing' if the pipe upstream stops producing.
---    However, if @u@ is 'Data.Void.Void', it means that the pipe upstream
---    will never stop, so you can use 'Data.Conduino.awaitSurely' to get
---    a guaranteed answer.
+-- *  If @a@ is 'Void', then the pipe never terminates --- it will keep on
+--    consuming and/or producing values forever.  If this is a sink, it
+--    means that the sink will never terminate, and so
+--    'Data.Condunio.runPipe' will also never terminate.  If it is
+--    a source, it means that if you chain something downstream with
+--    'Data.Condunio..|', that downstream pipe can use 'awaitSurely' to
+--    gaurantee something being passed down.
 --
 -- Applicative and Monadic sequencing of pipes chains by exhaustion.
 --

@@ -30,9 +30,9 @@
 -- and isolate each state to its own segment.  Each component can contain its own
 -- isolated state:
 -- 
--- >>> 'runPipePure' $ 'Data.Conduino.Combinators.sourceList' [1..10]
---       '.|' 'Data.Conduino.Combinators.scan' (+) 0
---       .| 'Data.Condunio.Combinators.sinkList'
+-- >>> runPipePure $ sourceList [1..10]
+--       .| scan (+) 0
+--       .| sinkList
 -- [1,3,6,10,15,21,28,36,45,55]
 -- 
 -- All of these components have internal "state":
@@ -100,6 +100,9 @@ await = either (const Nothing) Just <$> awaitEither
 -- succesful.
 --
 -- The await will always be succesful if @u@ is 'Void'.
+--
+-- This is a way of writing code in a way that is agnostic to how the
+-- upstream pipe terminates.
 awaitWith :: (i -> Pipe i o u m u) -> Pipe i o u m u
 awaitWith f = awaitEither >>= \case
     Left  r -> pure r
@@ -107,6 +110,14 @@ awaitWith f = awaitEither >>= \case
 
 -- | Await input from upstream where the upstream pipe is guaranteed to
 -- never terminate.
+--
+-- A common type error will occur if @u@ (upstream pipe result type) is not
+-- 'Void' -- it might be @()@ or some non-'Void' type.  This means that the
+-- upstream pipe terminates, so awaiting cannot be assured.
+--
+-- In that case, either change your upstream pipe to be one that never
+-- terminates (which is most likely not possible), or use 'await' instead
+-- of 'awaitSurely'.
 awaitSurely :: Pipe i o Void m i
 awaitSurely = either absurd id <$> awaitEither
 
