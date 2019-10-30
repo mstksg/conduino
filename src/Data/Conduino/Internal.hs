@@ -7,7 +7,20 @@
 {-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE TypeInType                 #-}
 {-# LANGUAGE TypeOperators              #-}
+{-# OPTIONS_HADDOCK not-home            #-}
 
+-- |
+-- Module      : Data.Conduino.Internal
+-- Copyright   : (c) Justin Le 2019
+-- License     : BSD3
+--
+-- Maintainer  : justin@jle.im
+-- Stability   : experimental
+-- Portability : non-portable
+--
+-- Internal module exposing the internals of 'Pipe', including its
+-- underlying representation and base functor.
+--
 module Data.Conduino.Internal (
     Pipe(..)
   , PipeF(..)
@@ -17,19 +30,32 @@ module Data.Conduino.Internal (
   , hoistPipe
   , RecPipe
   , toRecPipe, fromRecPipe
-  , annotatePipeF
   ) where
 
+import           Control.Monad.Except
 import           Control.Monad.Free.Class
-import           Control.Applicative
 import           Control.Monad.Free.TH
-import           Control.Monad.IO.Class
-import           Control.Monad.Trans.Class
+import           Control.Monad.RWS
 import           Control.Monad.Trans.Free        (FreeT(..))
 import           Control.Monad.Trans.Free.Church
-import           GHC.Generics
 
 -- | Base functor of 'Pipe'.
+--
+-- A pipe fundamentally has the ability to await and the ability to yield.
+-- The other functionality are implemented.
+--
+-- *  Lifting effects is implemented by the 'MonadTrans' and 'MonadIO'
+--    instances that 'FT' gives.
+-- *  /Ending/ with a result is implemented by the 'Applicative' instance's
+--   'pure' that 'FT' gives.
+-- *  Applicative and monadic sequenceing "after a pipe is done" is
+--    implemented by the 'Applicative' and 'Monad' instances that 'FT'
+--    gives.
+--
+-- On top of these we implement 'Data.Conduino..|' and other combinators
+-- based on the structure that 'FT' gives.  For some functions, it can be
+-- easier to use an alternative encoding, 'RecPipe', which is the same
+-- thing but explicitly recursive.
 data PipeF i o u a =
       PAwaitF (u -> a) (i -> a)
     | PYieldF o a
@@ -37,15 +63,9 @@ data PipeF i o u a =
 
 makeFree ''PipeF
 
-annotatePipeF :: PipeF i o u a -> (Const String :*: PipeF i o u) a
-annotatePipeF p = case p of
-    PAwaitF _ _ -> Const "PAwaitF" :*: p
-    PYieldF _ _ -> Const "PYieldF" :*: p
-
-  
-
-
--- | Similar to Conduit
+-- | Similar to a conduit from the /conduit/ package.
+--
+-- For a @'Pipe' i o u m a@, you have:
 --
 -- *  @i@: Type of input stream
 -- *  @o@: Type of output stream
@@ -70,14 +90,42 @@ annotatePipeF p = case p of
 --    However, if @u@ is 'Data.Void.Void', it means that the pipe upstream
 --    will never stop, so you can use 'Data.Conduino.awaitSurely' to get
 --    a guaranteed answer.
+--
+--
+-- Usually you would use it by chaining together pipes with
+-- 'Data.Condunio..|' and then running the result with
+-- 'Data.Condunio.runPipe'.
+--
+-- @
+-- 'Data.Conduino.runPipe' $ someSource
+--        'Data.Conduino..|' somePipe
+--        .| someOtherPipe
+--        .| someSink
+-- @
+--
+-- See 'Data.Condunio..|' and 'Data.Condunio.runPipe' for more information
+-- on usage.
+--
+-- For a "prelude" of commonly used 'Pipe's, see
+-- "Data.Condunio.Combinators".
+--
 newtype Pipe i o u m a = Pipe { pipeFree :: FT (PipeF i o u) m a }
-  deriving ( Functor
-           , Applicative
-           , Monad
-           , MonadTrans
-           , MonadFree (PipeF i o u)
-           , MonadIO
-           )
+  deriving
+    ( Functor
+    , Applicative
+    , Monad
+    , MonadTrans
+    , MonadFree (PipeF i o u)
+    , MonadIO
+    , MonadState s
+    , MonadReader r
+    , MonadWriter w
+    , MonadError e
+    , MonadRWS r w s
+    )
+
+instance MonadFail m => MonadFail (Pipe i o u m) where
+    fail = lift . fail
 
 -- | Await on upstream output.  Will block until it receives an @i@
 -- (expected input type) or a @u@ if the upstream pipe terminates.

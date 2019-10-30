@@ -2,6 +2,20 @@
 {-# LANGUAGE LambdaCase   #-}
 {-# LANGUAGE RankNTypes   #-}
 
+-- |
+-- Module      : Data.Conduino.Combinators
+-- Copyright   : (c) Justin Le 2019
+-- License     : BSD3
+--
+-- Maintainer  : justin@jle.im
+-- Stability   : experimental
+-- Portability : non-portable
+--
+-- A basic collection of base 'Pipe's that serve as a "prelude" for the
+-- package.  This module is meant to be imported qualified.
+--
+-- > import qualified Data.Conduino.Combinators as C
+--
 module Data.Conduino.Combinators (
   -- * Sources
   -- ** Pure

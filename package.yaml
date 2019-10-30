@@ -34,6 +34,7 @@ library:
   - transformers
   - bytestring
   - list-transformer
+  - mtl
 
 # executables:
 #   conduino-exe:

@@ -8,6 +8,20 @@
 {-# LANGUAGE TypeInType                 #-}
 {-# LANGUAGE ViewPatterns               #-}
 
+-- |
+-- Module      : Data.Conduino
+-- Copyright   : (c) Justin Le 2019
+-- License     : BSD3
+--
+-- Maintainer  : justin@jle.im
+-- Stability   : experimental
+-- Portability : non-portable
+--
+-- Base API for 'Pipe'.  See documentation for 'Pipe', '.|', and 'runPipe'
+-- for information on usage.
+--
+-- A "prelude" of useful pipes can be found in "Data.Conduino.Combinators".
+--
 module Data.Conduino (
     Pipe
   , (.|)
@@ -87,8 +101,8 @@ awaitForeverWith f g = go
       Left x  -> mapInput (const ()) $ f x
       Right x -> g x *> go
 
--- | Run a pipe that is both a source and a sink into the effect that it
--- represents.
+-- | Run a pipe that is both a source and a sink (an "effect") into the
+-- effect that it represents.
 --
 -- Usually you wouild construct this using something like:
 --
@@ -100,7 +114,31 @@ awaitForeverWith f g = go
 -- @
 --
 -- 'runPipe' will produce the result of that final sink.
-runPipe :: Monad m => Pipe () Void Void m a -> m a
+--
+-- Some common errors you might receive:
+--
+-- *  @i@ is not @()@: If you give a pipe where the first parameter
+--    ("input") is not @()@, it means that your pipe is not a producer.
+--    Pre-compose it (using '.|') with a producer of the type you need.
+--
+--    For example, if you have a @myPipe :: 'Pipe' 'Int' o u m a@, this is
+--    a pipe that is awaiting 'Int's from upstream.  Pre-compose with
+--    a producer of 'Int's, like @'Data.Conduino.Combinators.sourceList'
+--    [1,2,3] '.|' myPipe@, in order to be able to run it.
+--
+-- *  @o@ is not 'Void': If you give a pipe where the second parameter
+--    ("output") is not 'Void', it means that your pipe is not a consumer.
+--    Post-compose it (using '.|') with a consumer of the type you need.
+--
+--    For example, if you have @myPipe :: 'Pipe' i 'Int' u m a@, this is
+--    a pipe that is yielding 'Int's downstream that are going unhandled.
+--    Post-compose it a consumer of 'Int's, like @myPipe '.|'
+--    'Data.Conduino.foldl' (+) 0@, in order to be able to run it.
+--
+--    If you just want to ignore all downstream yields, post-compose with
+--    'Data.Conduino.Combinators.sinkNull'.
+--
+runPipe :: Monad m => Pipe () Void u m a -> m a
 runPipe = iterT go . pipeFree
   where
     go = \case
@@ -176,9 +214,9 @@ compPipe_ p q = FreeT $ runFreeT q >>= \qq -> case qq of
 -- ("all combinations").  Effectively this becomes like a "zipping"
 -- 'Applicative' instance for 'ListT'.
 --
--- If you want a 'Monad' (or 'MonadIO') instance, use 'ListT' instead, and
--- convert using 'toListT'/'fromListT' or the 'PipeList'
--- pattern/constructor.
+-- If you want a 'Monad' (or 'Control.Monad.IO.Class.MonadIO') instance,
+-- use 'ListT' instead, and convert using 'toListT'/'fromListT' or the
+-- 'PipeList' pattern/constructor.
 newtype ZipSource m a = ZipSource { getZipSource :: Pipe () a Void m () }
 
 -- | A source is equivalent to a 'ListT' producing a 'Maybe'; this pattern
@@ -335,9 +373,9 @@ altSink_
     -> RecPipe i Void u m a
 altSink_ p q = FreeT $ runFreeT p >>= \case
     Pure x             -> pure . Pure $ x
-    Free (PAwaitF f g) -> runFreeT q >>= \case
-      Pure x'              -> pure . Pure $ x'
-      Free (PAwaitF f' g') -> pure . Free $ PAwaitF (altSink_ <$> f <*> f') (altSink_ <$> g <*> g')
+    Free (PAwaitF f g) -> runFreeT q <&> \case
+      Pure x'              -> Pure x'
+      Free (PAwaitF f' g') -> Free $ PAwaitF (altSink_ <$> f <*> f') (altSink_ <$> g <*> g')
       Free (PYieldF x' _ ) -> absurd x'
     Free (PYieldF x _) -> absurd x
 
