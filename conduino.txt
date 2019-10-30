@@ -41,9 +41,9 @@ module Data.Conduino.Internal
 --   <li>If <tt>i</tt> is <tt>()</tt>, the pipe is a <i>source</i> --- it
 --   doesn't need anything to produce items. It will pump out items on its
 --   own, for pipes downstream to receive and process.</li>
---   <li>If <tt>o</tt> is <tt>Void</tt><tt>, the pipe is a <i>sink</i> ---
---   it will never <a>yield</a> anything downstream. It will consume items
---   from things upstream, and produce a result (</tt>a@) if and when it
+--   <li>If <tt>o</tt> is <tt>Void</tt>, the pipe is a <i>sink</i> --- it
+--   will never <a>yield</a> anything downstream. It will consume items
+--   from things upstream, and produce a result (<tt>a</tt>) if and when it
 --   terminates.</li>
 --   <li>If <tt>u</tt> is <tt>Void</tt>, then the pipe's upstream is
 --   limitless, and never terminates. This means that you can use
@@ -55,7 +55,7 @@ module Data.Conduino.Internal
 --   a sink, it means that the sink will never terminate, and so
 --   <a>runPipe</a> will also never terminate. If it is a source, it means
 --   that if you chain something downstream with <a>.|</a>, that downstream
---   pipe can use <tt>awaitSurely</tt> to gaurantee something being passed
+--   pipe can use <tt>awaitSurely</tt> to guarantee something being passed
 --   down.</li>
 --   </ul>
 --   
@@ -248,9 +248,9 @@ module Data.Conduino
 --   <li>If <tt>i</tt> is <tt>()</tt>, the pipe is a <i>source</i> --- it
 --   doesn't need anything to produce items. It will pump out items on its
 --   own, for pipes downstream to receive and process.</li>
---   <li>If <tt>o</tt> is <tt>Void</tt><tt>, the pipe is a <i>sink</i> ---
---   it will never <a>yield</a> anything downstream. It will consume items
---   from things upstream, and produce a result (</tt>a@) if and when it
+--   <li>If <tt>o</tt> is <tt>Void</tt>, the pipe is a <i>sink</i> --- it
+--   will never <a>yield</a> anything downstream. It will consume items
+--   from things upstream, and produce a result (<tt>a</tt>) if and when it
 --   terminates.</li>
 --   <li>If <tt>u</tt> is <tt>Void</tt>, then the pipe's upstream is
 --   limitless, and never terminates. This means that you can use
@@ -262,7 +262,7 @@ module Data.Conduino
 --   a sink, it means that the sink will never terminate, and so
 --   <a>runPipe</a> will also never terminate. If it is a source, it means
 --   that if you chain something downstream with <a>.|</a>, that downstream
---   pipe can use <tt>awaitSurely</tt> to gaurantee something being passed
+--   pipe can use <tt>awaitSurely</tt> to guarantee something being passed
 --   down.</li>
 --   </ul>
 --   

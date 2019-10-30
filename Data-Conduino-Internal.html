@@ -3,9 +3,9 @@
     upstream pipe terminates)</li><li><code>m</code>: Underlying monad (the things you can <code><a href="../list-transformer-1.0.6/List-Transformer.html#v:lift" title="List.Transformer">lift</a></code>)</li><li><code>a</code>: Result type when pipe terminates (outputted when finished, with
     <code><a href="../base-4.13.0.0/Control-Applicative.html#v:pure" title="Control.Applicative">pure</a></code> or <code><a href="../base-4.13.0.0/Control-Monad.html#v:return" title="Control.Monad">return</a></code>)</li></ul><p>Some specializations:</p><ul><li>If <code>i</code> is <code>()</code>, the pipe is a <em>source</em> --- it doesn't need anything
     to produce items.  It will pump out items on its own, for pipes
-    downstream to receive and process.</li><li>If <code>o</code> is <code>Void</code><code>, the pipe is a <em>sink</em> --- it will never <code><a href="Data-Conduino-Internal.html#v:yield" title="Data.Conduino.Internal">yield</a></code>
+    downstream to receive and process.</li><li>If <code>o</code> is <code>Void</code>, the pipe is a <em>sink</em> --- it will never <code><a href="Data-Conduino-Internal.html#v:yield" title="Data.Conduino.Internal">yield</a></code>
     anything downstream.  It will consume items from things upstream, and
-    produce a result (</code>a@) if and when it terminates.</li><li>If <code>u</code> is <code>Void</code>, then the pipe's upstream is limitless, and never
+    produce a result (<code>a</code>) if and when it terminates.</li><li>If <code>u</code> is <code>Void</code>, then the pipe's upstream is limitless, and never
     terminates.  This means that you can use <code><a href="Data-Condunio.html#v:awaitSurely" title="Data.Condunio">awaitSurely</a></code>
     instead of <code><a href="Data-Conduino.html#v:await" title="Data.Conduino">await</a></code>, to get await a value that is
     guaranteed to come.  You'll get an <code>i</code> instead of a <code><code><a href="../base-4.13.0.0/Data-Maybe.html#t:Maybe" title="Data.Maybe">Maybe</a></code> i</code>.</li><li>If <code>a</code> is <code>Void</code>, then the pipe never terminates --- it will keep on
@@ -14,7 +14,7 @@
     <code><a href="Data-Condunio.html#v:runPipe" title="Data.Condunio">runPipe</a></code> will also never terminate.  If it is
     a source, it means that if you chain something downstream with
     <code><a href="Data-Condunio.html#v:.-124-" title="Data.Condunio">.|</a></code>, that downstream pipe can use <code>awaitSurely</code> to
-    gaurantee something being passed down.</li></ul><p>Applicative and Monadic sequencing of pipes chains by exhaustion.</p><pre>do pipeX
+    guarantee something being passed down.</li></ul><p>Applicative and Monadic sequencing of pipes chains by exhaustion.</p><pre>do pipeX
    pipeY
    pipeZ
 </pre><p>is a pipe itself, that behaves like <code>pipeX</code> until it terminates, then

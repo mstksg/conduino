@@ -102,7 +102,7 @@ $cfmap :: forall i o u a b. (a -&gt; b) -&gt; PipeF i o u a -&gt; PipeF i o u b
 </span><span id="line-86"></span><span class="hs-comment">--    to produce items.  It will pump out items on its own, for pipes</span><span>
 </span><span id="line-87"></span><span class="hs-comment">--    downstream to receive and process.</span><span>
 </span><span id="line-88"></span><span class="hs-comment">--</span><span>
-</span><span id="line-89"></span><span class="hs-comment">-- *  If @o@ is 'Void'@, the pipe is a /sink/ --- it will never 'yield'</span><span>
+</span><span id="line-89"></span><span class="hs-comment">-- *  If @o@ is 'Void', the pipe is a /sink/ --- it will never 'yield'</span><span>
 </span><span id="line-90"></span><span class="hs-comment">--    anything downstream.  It will consume items from things upstream, and</span><span>
 </span><span id="line-91"></span><span class="hs-comment">--    produce a result (@a@) if and when it terminates.</span><span>
 </span><span id="line-92"></span><span class="hs-comment">--</span><span>
@@ -117,7 +117,7 @@ $cfmap :: forall i o u a b. (a -&gt; b) -&gt; PipeF i o u a -&gt; PipeF i o u b
 </span><span id="line-101"></span><span class="hs-comment">--    'Data.Condunio.runPipe' will also never terminate.  If it is</span><span>
 </span><span id="line-102"></span><span class="hs-comment">--    a source, it means that if you chain something downstream with</span><span>
 </span><span id="line-103"></span><span class="hs-comment">--    'Data.Condunio..|', that downstream pipe can use 'awaitSurely' to</span><span>
-</span><span id="line-104"></span><span class="hs-comment">--    gaurantee something being passed down.</span><span>
+</span><span id="line-104"></span><span class="hs-comment">--    guarantee something being passed down.</span><span>
 </span><span id="line-105"></span><span class="hs-comment">--</span><span>
 </span><span id="line-106"></span><span class="hs-comment">-- Applicative and Monadic sequencing of pipes chains by exhaustion.</span><span>
 </span><span id="line-107"></span><span class="hs-comment">--</span><span>
