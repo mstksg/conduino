@@ -50,53 +50,62 @@ API-wise, is closer to *conduit* than *pipes*.  Pull-based, where the main
 runPipe :: Pipe () Void u m a -> m a
 ```
 
-That is, the "production" and "consumption" is integrated into one single
-pipe, and then run all at once.  Contrast this to *pipes*, where
-consumption is not integrated into the pipe, but rather your choice of
-"runner" determines how your pipe is consumed.
+That is, the "production" and "consumption" is integrated into one single pipe,
+and then run all at once.  Contrast this to *pipes*, where consumption is not
+integrated into the pipe, but rather your choice of "runner" determines how
+your pipe is consumed.
 
 One extra advantage over *conduit* is that we have the ability to model pipes
 that will never stop producing output, so we can have an `await` function that
 can reliably fetch items upstream.  This matches more *pipes*-style requests.
 
-For a `Pipe i o u m a`:
+For a `Pipe i o u m a`, you have:
 
-*   `i` is the type of the upstream input expected
-*   `o` is the type of the downstream output produced
-*   `u` is the *result* type of the upstream pipe (the value it will see
-    when the upstream pipe stops outputting)
-*   `m` is the underlying monad where the actions take place
-*   `a` is the result type that the pipe will produce once it 
+*    `i`: Type of input stream (the things you can `await`)
+*    `o`: Type of output stream (the things you `yield`)
+*    `u`: Type of the *result* of the upstream pipe (Outputted when upstream
+     pipe terminates)
+*    `m`: Underlying monad (the things you can `lift`)
+*    `a`: Result type when pipe terminates (outputted when finished, with
+     `pure` or `return`)
 
-From these, we can specialize:
+Some specializations:
 
-*   If `i` is `()`, then the pipe is a *source*: it doesn't expect any input to
-    be able to pump out items.
+*   If `i` is `()`, the pipe is a *source* --- it doesn't need anything to
+    produce items.  It will pump out items on its own, for pipes downstream to
+    receive and process.
 
-    If `a` for a source is `Void`, it means that the source will produce values
-    forever.
-*   If `o` is `Void`, then the pipe is a *sink*: it won't ever output any
-    items downstream.
-*   If if a pipe is both a source and a sink (`Pipe () Void`), the pipe is an
-    *effect*: It is something that can be run as an effect with `runPipe`.
+*   If `o` is `Void`, the pipe is a *sink* --- it will never `yield` anything
+    downstream.  It will consume items from things upstream, and produce a
+    result (`a`) if and when it terminates.
 
-Normally, we have `await`:
+*   If `u` is `Void`, then the pipe's upstream is limitless, and never
+    terminates.  This means that you can use `awaitSurely` instead of `await`,
+    to get await a value that is guaranteed to come.  You'll get an `i` instead
+    of a `Maybe i`.
+
+    ```haskell
+    await       :: Pipe i o u m (Maybe i)
+    awaitsurely :: Pipe i o Void m i
+    ```
+
+*   If `a` is `Void`, then the pipe never terminates --- it will keep on
+    consuming and/or producing values forever.  If this is a sink, it means
+    that the sink will never terminate, and so `runPipe` will also never
+    terminate. If it is a source, it means that if you chain something
+    downstream with `.|`, that downstream pipe can use `awaitSurely` to
+    guarantee something being passed down.
+
+Usually you would use it by chaining together pipes with `.|` and then running
+the result with `runPipe`.
 
 ```haskell
-await :: Pipe i o u m (Maybe i)
+runPipe $ someSource
+       .| somePipe
+       .| someOtherPipe
+       .| someSink
 ```
 
-It will return `Nothing` if the upstream pipe stops producing.
-
-However, if `u` is `Void`, we can use:
-
-```haskell
-awaitSurely :: Pipe i o Void m i
-```
-
-for an `await` that will *always* return a value.  That is because `u` is the
-type of the upstream pipe's result, but if `u` is `Void`, it means that the
-upstream pipe will never finish with a result, and keep producing forever.
 
 ## Why does this package exist?
 
@@ -106,9 +115,11 @@ and *conduit*, because:
 
 1.  I wanted conduit-style semantics for stream composition (source - producer -
     sink all in one package).
-3.  I wanted type-enforced guaranteed "awaits" based on type-enforced
+2.  I wanted type-enforced guaranteed "awaits" based on type-enforced
     guaranteed infinite producers.
-2.  I wanted something lightweight without the dependencies dealing with IO,
+3.  I wanted to be able to combine stream processors "in parallel" in
+    different ways (`zipSink`, for "and", and `altSink`, for "or").
+3.  I wanted something lightweight without the dependencies dealing with IO,
     since I wasn't really doing resource-sensitive IO.
 
 *conduino* is a small, lightweight version that is focused not necessarily on

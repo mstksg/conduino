@@ -86,7 +86,7 @@ makeFree ''PipeF
 --    to produce items.  It will pump out items on its own, for pipes
 --    downstream to receive and process.
 --
--- *  If @o@ is 'Void'@, the pipe is a /sink/ --- it will never 'yield'
+-- *  If @o@ is 'Void', the pipe is a /sink/ --- it will never 'yield'
 --    anything downstream.  It will consume items from things upstream, and
 --    produce a result (@a@) if and when it terminates.
 --
@@ -101,7 +101,7 @@ makeFree ''PipeF
 --    'Data.Condunio.runPipe' will also never terminate.  If it is
 --    a source, it means that if you chain something downstream with
 --    'Data.Condunio..|', that downstream pipe can use 'awaitSurely' to
---    gaurantee something being passed down.
+--    guarantee something being passed down.
 --
 -- Applicative and Monadic sequencing of pipes chains by exhaustion.
 --
