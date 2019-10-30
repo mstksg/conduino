@@ -9,9 +9,14 @@
 @package conduino
 @version 0.1.0.0
 
+
+-- | Internal module exposing the internals of <a>Pipe</a>, including its
+--   underlying representation and base functor.
 module Data.Conduino.Internal
 
--- | Similar to Conduit
+-- | Similar to a conduit from the <i>conduit</i> package.
+--   
+--   For a <tt><a>Pipe</a> i o u m a</tt>, you have:
 --   
 --   <ul>
 --   <li><tt>i</tt>: Type of input stream</li>
@@ -38,11 +43,63 @@ module Data.Conduino.Internal
 --   never stop, so you can use <a>awaitSurely</a> to get a guaranteed
 --   answer.</li>
 --   </ul>
+--   
+--   Applicative and Monadic sequencing of pipes chains by exhaustion.
+--   
+--   <pre>
+--   do pipeX
+--      pipeY
+--      pipeZ
+--   </pre>
+--   
+--   is a pipe itself, that behaves like <tt>pipeX</tt> until it
+--   terminates, then <tt>pipeY</tt> until it terminates, then
+--   <tt>pipeZ</tt> until it terminates. The <a>Monad</a> instance allows
+--   you to choose "which pipe to behave like next" based on the
+--   terminating result of a previous pipe.
+--   
+--   <pre>
+--   do x &lt;- pipeX
+--      pipeBasedOn x
+--   </pre>
+--   
+--   Usually you would use it by chaining together pipes with <a>.|</a> and
+--   then running the result with <a>runPipe</a>.
+--   
+--   <pre>
+--   <a>runPipe</a> $ someSource
+--          <a>.|</a> somePipe
+--          .| someOtherPipe
+--          .| someSink
+--   </pre>
+--   
+--   See <a>.|</a> and <a>runPipe</a> for more information on usage.
+--   
+--   For a "prelude" of commonly used <a>Pipe</a>s, see
+--   <a>Data.Condunio.Combinators</a>.
 newtype Pipe i o u m a
 Pipe :: FT (PipeF i o u) m a -> Pipe i o u m a
 [pipeFree] :: Pipe i o u m a -> FT (PipeF i o u) m a
 
 -- | Base functor of <a>Pipe</a>.
+--   
+--   A pipe fundamentally has the ability to await and the ability to
+--   yield. The other functionality are implemented.
+--   
+--   <ul>
+--   <li>Lifting effects is implemented by the <a>MonadTrans</a> and
+--   <a>MonadIO</a> instances that <a>FT</a> gives.</li>
+--   <li><i>Ending</i> with a result is implemented by the
+--   <a>Applicative</a> instance's <a>pure</a> that <a>FT</a> gives.</li>
+--   <li>Applicative and monadic sequenceing "after a pipe is done" is
+--   implemented by the <a>Applicative</a> and <a>Monad</a> instances that
+--   <a>FT</a> gives.</li>
+--   </ul>
+--   
+--   On top of these we implement <a>.|</a> and other combinators based on
+--   the structure that <a>FT</a> gives. For some functions, it can be
+--   easier to use an alternative encoding, <a>RecPipe</a>, which is the
+--   same thing but explicitly recursive.
 data PipeF i o u a
 PAwaitF :: (u -> a) -> (i -> a) -> PipeF i o u a
 PYieldF :: o -> a -> PipeF i o u a
@@ -87,18 +144,76 @@ toRecPipe :: Monad m => Pipe i o u m a -> RecPipe i o u m a
 
 -- | Convert a <a>RecPipe</a> back into a <a>Pipe</a>.
 fromRecPipe :: Monad m => RecPipe i o u m a -> Pipe i o u m a
-annotatePipeF :: PipeF i o u a -> (Const String :*: PipeF i o u) a
+instance (Control.Monad.Reader.Class.MonadReader r m, Control.Monad.Writer.Class.MonadWriter w m, Control.Monad.State.Class.MonadState s m) => Control.Monad.RWS.Class.MonadRWS r w s (Data.Conduino.Internal.Pipe i o u m)
+instance Control.Monad.Error.Class.MonadError e m => Control.Monad.Error.Class.MonadError e (Data.Conduino.Internal.Pipe i o u m)
+instance Control.Monad.Writer.Class.MonadWriter w m => Control.Monad.Writer.Class.MonadWriter w (Data.Conduino.Internal.Pipe i o u m)
+instance Control.Monad.Reader.Class.MonadReader r m => Control.Monad.Reader.Class.MonadReader r (Data.Conduino.Internal.Pipe i o u m)
+instance Control.Monad.State.Class.MonadState s m => Control.Monad.State.Class.MonadState s (Data.Conduino.Internal.Pipe i o u m)
 instance Control.Monad.IO.Class.MonadIO m => Control.Monad.IO.Class.MonadIO (Data.Conduino.Internal.Pipe i o u m)
 instance Control.Monad.Free.Class.MonadFree (Data.Conduino.Internal.PipeF i o u) (Data.Conduino.Internal.Pipe i o u m)
 instance Control.Monad.Trans.Class.MonadTrans (Data.Conduino.Internal.Pipe i o u)
 instance GHC.Base.Monad (Data.Conduino.Internal.Pipe i o u m)
 instance GHC.Base.Applicative (Data.Conduino.Internal.Pipe i o u m)
 instance GHC.Base.Functor (Data.Conduino.Internal.Pipe i o u m)
+instance Control.Monad.Fail.MonadFail m => Control.Monad.Fail.MonadFail (Data.Conduino.Internal.Pipe i o u m)
 instance GHC.Base.Functor (Data.Conduino.Internal.PipeF i o u)
 
+
+-- | Base API for <a>Pipe</a>. See documentation for <a>Pipe</a>,
+--   <a>.|</a>, and <a>runPipe</a> for information on usage.
+--   
+--   A "prelude" of useful pipes can be found in
+--   <a>Data.Conduino.Combinators</a>.
+--   
+--   <h2>Why a stream processing library?</h2>
+--   
+--   A stream processing library is a way to stream processors in a
+--   <i>composable</i> way: instead of defining your entire stream
+--   processing function as a single recursive loop with some global state,
+--   instead think about each "stage" of the process, and isolate each
+--   state to its own segment. Each component can contain its own isolated
+--   state:
+--   
+--   <pre>
+--   &gt;&gt;&gt; 'runPipePure' $ 'Data.Conduino.Combinators.sourceList' [1..10]
+--         '.|' 'Data.Conduino.Combinators.scan' (+) 0
+--         .| 'Data.Condunio.Combinators.sinkList'
+--   [1,3,6,10,15,21,28,36,45,55]
+--   </pre>
+--   
+--   All of these components have internal "state":
+--   
+--   <ul>
+--   <li><tt>sourceList</tt> keeps track of "which" item in the list to
+--   yield next</li>
+--   <li><tt>scan</tt> keeps track of the current running sum</li>
+--   <li><tt>sinkList</tt> keeps track of all items that have been seen so
+--   far, as a list</li>
+--   </ul>
+--   
+--   They all work together without knowing any other component's internal
+--   state, so you can write your total streaming function without
+--   concerning yourself, at each stage, with the entire part.
+--   
+--   In addition, there are useful functions to "combine" stream
+--   processors:
+--   
+--   <ul>
+--   <li><a>zipSink</a> combines sinks in an "and" sort of way: combine two
+--   sinks in parallel and finish when all finish.</li>
+--   <li><a>altSink</a> combines sinks in an "or" sort of way: combine two
+--   sinks in parallel and finish when any of them finish</li>
+--   <li><tt>zipSource</tt> combines sources in parallel and collate their
+--   outputs.</li>
+--   </ul>
+--   
+--   Stream processing libraries are also useful for streaming composition
+--   of monadic effects (like IO or State), as well.
 module Data.Conduino
 
--- | Similar to Conduit
+-- | Similar to a conduit from the <i>conduit</i> package.
+--   
+--   For a <tt><a>Pipe</a> i o u m a</tt>, you have:
 --   
 --   <ul>
 --   <li><tt>i</tt>: Type of input stream</li>
@@ -125,6 +240,40 @@ module Data.Conduino
 --   never stop, so you can use <a>awaitSurely</a> to get a guaranteed
 --   answer.</li>
 --   </ul>
+--   
+--   Applicative and Monadic sequencing of pipes chains by exhaustion.
+--   
+--   <pre>
+--   do pipeX
+--      pipeY
+--      pipeZ
+--   </pre>
+--   
+--   is a pipe itself, that behaves like <tt>pipeX</tt> until it
+--   terminates, then <tt>pipeY</tt> until it terminates, then
+--   <tt>pipeZ</tt> until it terminates. The <a>Monad</a> instance allows
+--   you to choose "which pipe to behave like next" based on the
+--   terminating result of a previous pipe.
+--   
+--   <pre>
+--   do x &lt;- pipeX
+--      pipeBasedOn x
+--   </pre>
+--   
+--   Usually you would use it by chaining together pipes with <a>.|</a> and
+--   then running the result with <a>runPipe</a>.
+--   
+--   <pre>
+--   <a>runPipe</a> $ someSource
+--          <a>.|</a> somePipe
+--          .| someOtherPipe
+--          .| someSink
+--   </pre>
+--   
+--   See <a>.|</a> and <a>runPipe</a> for more information on usage.
+--   
+--   For a "prelude" of commonly used <a>Pipe</a>s, see
+--   <a>Data.Condunio.Combinators</a>.
 data Pipe i o u m a
 
 -- | The main operator for chaining pipes together. <tt>pipe1 .| pipe2</tt>
@@ -151,8 +300,8 @@ data Pipe i o u m a
 (.|) :: Monad m => Pipe a b u m v -> Pipe b c v m r -> Pipe a c u m r
 infixr 2 .|
 
--- | Run a pipe that is both a source and a sink into the effect that it
---   represents.
+-- | Run a pipe that is both a source and a sink (an "effect") into the
+--   effect that it represents.
 --   
 --   Usually you wouild construct this using something like:
 --   
@@ -164,7 +313,37 @@ infixr 2 .|
 --   </pre>
 --   
 --   <a>runPipe</a> will produce the result of that final sink.
-runPipe :: Monad m => Pipe () Void Void m a -> m a
+--   
+--   Some common errors you might receive:
+--   
+--   <ul>
+--   <li><tt>i</tt> is not <tt>()</tt>: If you give a pipe where the first
+--   parameter ("input") is not <tt>()</tt>, it means that your pipe is not
+--   a producer. Pre-compose it (using <a>.|</a>) with a producer of the
+--   type you need.</li>
+--   </ul>
+--   
+--   For example, if you have a <tt>myPipe :: <a>Pipe</a> <a>Int</a> o u m
+--   a</tt>, this is a pipe that is awaiting <a>Int</a>s from upstream.
+--   Pre-compose with a producer of <a>Int</a>s, like <tt><a>sourceList</a>
+--   [1,2,3] <a>.|</a> myPipe</tt>, in order to be able to run it.
+--   
+--   <ul>
+--   <li><tt>o</tt> is not <a>Void</a>: If you give a pipe where the second
+--   parameter ("output") is not <a>Void</a>, it means that your pipe is
+--   not a consumer. Post-compose it (using <a>.|</a>) with a consumer of
+--   the type you need.</li>
+--   </ul>
+--   
+--   For example, if you have <tt>myPipe :: <a>Pipe</a> i <a>Int</a> u m
+--   a</tt>, this is a pipe that is yielding <a>Int</a>s downstream that
+--   are going unhandled. Post-compose it a consumer of <a>Int</a>s, like
+--   <tt>myPipe <a>.|</a> <a>foldl</a> (+) 0</tt>, in order to be able to
+--   run it.
+--   
+--   If you just want to ignore all downstream yields, post-compose with
+--   <a>sinkNull</a>.
+runPipe :: Monad m => Pipe () Void u m a -> m a
 
 -- | <a>runPipe</a> when the underlying monad is <a>Identity</a>, and so
 --   has no effects.
@@ -250,7 +429,7 @@ trimapPipe :: (i -> j) -> (p -> o) -> (u -> v) -> Pipe j p v m a -> Pipe i o u m
 --   instance for <a>ListT</a> ("all combinations"). Effectively this
 --   becomes like a "zipping" <a>Applicative</a> instance for <a>ListT</a>.
 --   
---   If you want a <a>Monad</a> (or <tt>MonadIO</tt>) instance, use
+--   If you want a <a>Monad</a> (or <a>MonadIO</a>) instance, use
 --   <a>ListT</a> instead, and convert using
 --   <a>toListT</a>/<a>fromListT</a> or the <a>PipeList</a>
 --   pattern/constructor.
@@ -326,6 +505,13 @@ instance GHC.Base.Monad m => GHC.Base.Applicative (Data.Conduino.ZipSource m)
 instance GHC.Base.Monad m => GHC.Base.Alternative (Data.Conduino.ZipSource m)
 instance Control.Monad.Trans.Class.MonadTrans Data.Conduino.ZipSource
 
+
+-- | A basic collection of base <a>Pipe</a>s that serve as a "prelude" for
+--   the package. This module is meant to be imported qualified.
+--   
+--   <pre>
+--   import qualified Data.Conduino.Combinators as C
+--   </pre>
 module Data.Conduino.Combinators
 
 -- | Repeatedly apply an "unfolding" function to a given initial state,
@@ -338,23 +524,27 @@ unfold :: (s -> (o, s)) -> s -> Pipe i o u m a
 --   result forever.
 --   
 --   <pre>
---   <a>runPipePure</a> $ <a>iterate</a> succ 0
---              <a>.</a>| <a>take</a> 5
---              .| <a>sinkList</a>
---   
---   -- [1,2,3,4,5]
+--   &gt;&gt;&gt; 'runPipePure' $ 'iterate' succ 0
+--         '.'| 'take' 5
+--         .| 'sinkList'
 --   </pre>
+--   
+--   <ul>
+--   <li><i>1,2,3,4,5</i></li>
+--   </ul>
 --   
 --   This doesn't yield the original starting value. However, you can yield
 --   it iterate after:
 --   
 --   <pre>
---   <a>runPipePure</a> $ (<a>yield</a> 0 &gt;&gt; <a>iterate</a> succ 0)
---              <a>.</a>| <a>take</a> 5
---              .| <a>sinkList</a>
---   
---   -- [0,1,2,3,4,5]
+--   &gt;&gt;&gt; 'runPipePure' $ ('yield' 0 &gt;&gt; 'iterate' succ 0)
+--         '.'| 'take' 5
+--         .| 'sinkList'
 --   </pre>
+--   
+--   <ul>
+--   <li><i>0,1,2,3,4,5</i></li>
+--   </ul>
 iterate :: (o -> o) -> o -> Pipe i o u m a
 
 -- | Repeatedly yield a given item forever.
@@ -435,11 +625,11 @@ mapM :: Monad m => (i -> m o) -> Pipe i o u m u
 -- | Like <a>foldl</a>, but yields every accumulator value downstream.
 --   
 --   <pre>
---   <a>runPipePure</a> $ <a>sourceList</a> [1..10]
---              .| <a>scan</a> (+) 0
---              .| <a>sinkList</a>
---   
---   -- [1,3,6,10,15,21,28,36,45,55]
+--   &gt;&gt;&gt; 'runPipePure' $ 'sourceList' [1..10]
+--         .| 'scan' (+) 0
+--         .| 'sinkList'
+--   [1,3,6,10,15,21,28,36,45,55]
+--   @
 --   </pre>
 scan :: (o -> i -> o) -> o -> Pipe i o u m u
 
@@ -454,13 +644,12 @@ mapAccum :: (i -> s -> (s, o)) -> s -> Pipe i o u m u
 --   This is most useful if you sequence a second conduit after it.
 --   
 --   <pre>
---   <a>runPipePure</a> $ <a>sourceList</a> [1..8]
---              <a>.</a>| (do <a>take</a> 3 .| <a>map</a> (*2)         -- double the first 3 items
---                     <a>map</a> negate                 -- negate the rest
---                 )
---              .| <a>sinkList</a>
---   
---   -- [2,4,6,-4,-5,-6,-7,-8]
+--   &gt;&gt;&gt; 'runPipePure' $ 'sourceList' [1..8]
+--         '.'| (do 'take' 3 .| 'map' (*2)         -- double the first 3 items
+--                'map' negate                 -- negate the rest
+--            )
+--         .| 'sinkList'
+--   [2,4,6,-4,-5,-6,-7,-8]
 --   </pre>
 take :: Int -> Pipe i i u m ()
 
@@ -482,15 +671,48 @@ concatMap :: Foldable t => (i -> t o) -> Pipe i o u m u
 --   successively.
 concat :: Foldable t => Pipe (t i) i u m u
 
+-- | Yield consecutive pairs of values.
+--   
+--   <pre>
+--   &gt;&gt;&gt; 'runPipePure' $ 'sourceList' [1..5]
+--         '.|' 'pairs'
+--         .| 'sinkList'
+--   [(1,2),(2,3),(3,4),(4,5)]
+--   </pre>
+pairs :: Pipe i (i, i) u m u
+
+-- | Yield consecutive runs of at most <tt>n</tt> of values, starting with
+--   an empty sequence.
+--   
+--   To get only "full" sequences, pipe with <a>filter</a>.
+--   
+--   <pre>
+--   &gt;&gt;&gt; 'runPipePure' $ 'sourceList' [1..6]
+--         '.|' 'consecutive' 3
+--         .| 'map' 'toList'
+--         .| 'sinkList
+--   [[],[1],[1,2],[1,2,3],[2,3,4],[3,4,5],[4,5,6]]
+--   </pre>
+--   
+--   <pre>
+--   &gt;&gt;&gt; 'runPipePure' $ 'sourceList' [1..6]
+--         '.|' 'consecutive' 3
+--         .| 'filter' (('==' 3) . 'Seq.length')
+--         .| 'map' 'toList'
+--         .| 'sinkList
+--   [[1,2,3],[2,3,4],[3,4,5],[4,5,6]]
+--   </pre>
+consecutive :: Int -> Pipe i (Seq i) u m u
+
 -- | Ignore a certain amount of items from the input stream, and then stop
 --   producing forever.
 --   
 --   This is most useful if you sequence a second consumer after it:
 --   
 --   <pre>
---   <a>runPipePure</a> $ <a>sourceList</a> [1..8]
---              <a>.|</a> (<a>drop</a> 3 &gt;&gt; <a>sinkList</a>)
---   -- [4,5,6,7,8]
+--   &gt;&gt;&gt; 'runPipePure' $ 'sourceList' [1..8]
+--         '.|' ('drop' 3 &gt;&gt; 'sinkList')
+--   [4,5,6,7,8]
 --   </pre>
 drop :: Int -> Pipe i o u m ()
 
