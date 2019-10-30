@@ -220,18 +220,18 @@ forall b c a. (b -&gt; c) -&gt; (a -&gt; b) -&gt; a -&gt; c
 </span><span id="line-141"></span><span class="hs-comment">-- | Repeatedly apply a function to a given starting value and yield each</span><span>
 </span><span id="line-142"></span><span class="hs-comment">-- result forever.</span><span>
 </span><span id="line-143"></span><span class="hs-comment">--</span><span>
-</span><span id="line-144"></span><span class="hs-comment">-- &gt;&gt;&gt; 'runPipePure' $ 'iterate' succ 0</span><span>
-</span><span id="line-145"></span><span class="hs-comment">--       '.'| 'take' 5</span><span>
-</span><span id="line-146"></span><span class="hs-comment">--       .| 'sinkList'</span><span>
+</span><span id="line-144"></span><span class="hs-comment">-- &gt;&gt;&gt; runPipePure $ iterate succ 0</span><span>
+</span><span id="line-145"></span><span class="hs-comment">--       .| take 5</span><span>
+</span><span id="line-146"></span><span class="hs-comment">--       .| sinkList</span><span>
 </span><span id="line-147"></span><span class="hs-comment">--</span><span>
 </span><span id="line-148"></span><span class="hs-comment">-- [1,2,3,4,5]</span><span>
 </span><span id="line-149"></span><span class="hs-comment">--</span><span>
 </span><span id="line-150"></span><span class="hs-comment">-- This doesn't yield the original starting value.  However, you can yield</span><span>
 </span><span id="line-151"></span><span class="hs-comment">-- it iterate after:</span><span>
 </span><span id="line-152"></span><span class="hs-comment">--</span><span>
-</span><span id="line-153"></span><span class="hs-comment">-- &gt;&gt;&gt; 'runPipePure' $ ('yield' 0 &gt;&gt; 'iterate' succ 0)</span><span>
-</span><span id="line-154"></span><span class="hs-comment">--       '.'| 'take' 5</span><span>
-</span><span id="line-155"></span><span class="hs-comment">--       .| 'sinkList'</span><span>
+</span><span id="line-153"></span><span class="hs-comment">-- &gt;&gt;&gt; runPipePure $ (yield 0 &gt;&gt; iterate succ 0)</span><span>
+</span><span id="line-154"></span><span class="hs-comment">--       .| take 5</span><span>
+</span><span id="line-155"></span><span class="hs-comment">--       .| sinkList</span><span>
 </span><span id="line-156"></span><span class="hs-comment">--</span><span>
 </span><span id="line-157"></span><span class="hs-comment">-- [0,1,2,3,4,5]</span><span>
 </span><span id="line-158"></span><span id="local-6989586621679098870"><span id="local-6989586621679098871"><span id="local-6989586621679098872"><span id="local-6989586621679098873"><span id="local-6989586621679098874"><span class="annot"><a href="Data.Conduino.Combinators.html#iterate"><span class="hs-identifier hs-type">iterate</span></a></span><span>
@@ -686,9 +686,9 @@ forall (f :: * -&gt; *) a b. Applicative f =&gt; f a -&gt; f b -&gt; f b
 </span><span id="line-298"></span><span>
 </span><span id="line-299"></span><span class="hs-comment">-- | Like 'foldl', but yields every accumulator value downstream.</span><span>
 </span><span id="line-300"></span><span class="hs-comment">--</span><span>
-</span><span id="line-301"></span><span class="hs-comment">-- &gt;&gt;&gt; 'runPipePure' $ 'sourceList' [1..10]</span><span>
-</span><span id="line-302"></span><span class="hs-comment">--       .| 'scan' (+) 0</span><span>
-</span><span id="line-303"></span><span class="hs-comment">--       .| 'sinkList'</span><span>
+</span><span id="line-301"></span><span class="hs-comment">-- &gt;&gt;&gt; runPipePure $ sourceList [1..10]</span><span>
+</span><span id="line-302"></span><span class="hs-comment">--       .| scan (+) 0</span><span>
+</span><span id="line-303"></span><span class="hs-comment">--       .| sinkList</span><span>
 </span><span id="line-304"></span><span class="hs-comment">-- [1,3,6,10,15,21,28,36,45,55]</span><span>
 </span><span id="line-305"></span><span class="hs-comment">-- @</span><span>
 </span><span id="line-306"></span><span id="local-6989586621679098781"><span id="local-6989586621679098782"><span id="local-6989586621679098783"><span id="local-6989586621679098784"><span class="annot"><a href="Data.Conduino.Combinators.html#scan"><span class="hs-identifier hs-type">scan</span></a></span><span>
@@ -726,9 +726,9 @@ forall (f :: * -&gt; *) a b. Applicative f =&gt; f a -&gt; f b -&gt; f b
 </span><span id="line-315"></span><span>
 </span><span id="line-316"></span><span class="hs-comment">-- | Yield consecutive pairs of values.</span><span>
 </span><span id="line-317"></span><span class="hs-comment">--</span><span>
-</span><span id="line-318"></span><span class="hs-comment">-- &gt;&gt;&gt; 'runPipePure' $ 'sourceList' [1..5]</span><span>
-</span><span id="line-319"></span><span class="hs-comment">--       '.|' 'pairs'</span><span>
-</span><span id="line-320"></span><span class="hs-comment">--       .| 'sinkList'</span><span>
+</span><span id="line-318"></span><span class="hs-comment">-- &gt;&gt;&gt; runPipePure $ sourceList [1..5]</span><span>
+</span><span id="line-319"></span><span class="hs-comment">--       .| pairs</span><span>
+</span><span id="line-320"></span><span class="hs-comment">--       .| sinkList</span><span>
 </span><span id="line-321"></span><span class="hs-comment">-- [(1,2),(2,3),(3,4),(4,5)]</span><span>
 </span><span id="line-322"></span><span id="local-6989586621679098773"><span id="local-6989586621679098774"><span id="local-6989586621679098775"><span class="annot"><a href="Data.Conduino.Combinators.html#pairs"><span class="hs-identifier hs-type">pairs</span></a></span><span> </span><span class="hs-glyph">::</span><span> </span><span class="annot"><a href="Data.Conduino.Internal.html#Pipe"><span class="hs-identifier hs-type">Pipe</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679098775"><span class="hs-identifier hs-type">i</span></a></span><span> </span><span class="hs-special">(</span><span class="annot"><a href="#local-6989586621679098775"><span class="hs-identifier hs-type">i</span></a></span><span class="hs-special">,</span><span> </span><span class="annot"><a href="#local-6989586621679098775"><span class="hs-identifier hs-type">i</span></a></span><span class="hs-special">)</span><span> </span><span class="annot"><a href="#local-6989586621679098774"><span class="hs-identifier hs-type">u</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679098773"><span class="hs-identifier hs-type">m</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679098774"><span class="hs-identifier hs-type">u</span></a></span></span></span></span><span>
 </span><span id="line-323"></span><span id="pairs"><span class="annot"><span class="annottext">pairs :: Pipe i (i, i) u m u
@@ -761,17 +761,17 @@ forall o i u (m :: * -&gt; *). o -&gt; Pipe i o u m ()
 </span><span id="line-331"></span><span class="hs-comment">--</span><span>
 </span><span id="line-332"></span><span class="hs-comment">-- To get only &quot;full&quot; sequences, pipe with 'filter'.</span><span>
 </span><span id="line-333"></span><span class="hs-comment">--</span><span>
-</span><span id="line-334"></span><span class="hs-comment">-- &gt;&gt;&gt; 'runPipePure' $ 'sourceList' [1..6]</span><span>
-</span><span id="line-335"></span><span class="hs-comment">--       '.|' 'consecutive' 3</span><span>
-</span><span id="line-336"></span><span class="hs-comment">--       .| 'map' 'toList'</span><span>
-</span><span id="line-337"></span><span class="hs-comment">--       .| 'sinkList</span><span>
+</span><span id="line-334"></span><span class="hs-comment">-- &gt;&gt;&gt; runPipePure $ sourceList [1..6]</span><span>
+</span><span id="line-335"></span><span class="hs-comment">--       .| consecutive 3</span><span>
+</span><span id="line-336"></span><span class="hs-comment">--       .| map toList</span><span>
+</span><span id="line-337"></span><span class="hs-comment">--       .| sinkList</span><span>
 </span><span id="line-338"></span><span class="hs-comment">-- [[],[1],[1,2],[1,2,3],[2,3,4],[3,4,5],[4,5,6]]</span><span>
 </span><span id="line-339"></span><span class="hs-comment">--</span><span>
-</span><span id="line-340"></span><span class="hs-comment">-- &gt;&gt;&gt; 'runPipePure' $ 'sourceList' [1..6]</span><span>
-</span><span id="line-341"></span><span class="hs-comment">--       '.|' 'consecutive' 3</span><span>
-</span><span id="line-342"></span><span class="hs-comment">--       .| 'filter' (('==' 3) . 'Seq.length')</span><span>
-</span><span id="line-343"></span><span class="hs-comment">--       .| 'map' 'toList'</span><span>
-</span><span id="line-344"></span><span class="hs-comment">--       .| 'sinkList</span><span>
+</span><span id="line-340"></span><span class="hs-comment">-- &gt;&gt;&gt; runPipePure $ sourceList [1..6]</span><span>
+</span><span id="line-341"></span><span class="hs-comment">--       .| consecutive 3</span><span>
+</span><span id="line-342"></span><span class="hs-comment">--       .| filter ((== 3) . Seq.length)</span><span>
+</span><span id="line-343"></span><span class="hs-comment">--       .| map toList</span><span>
+</span><span id="line-344"></span><span class="hs-comment">--       .| sinkList</span><span>
 </span><span id="line-345"></span><span class="hs-comment">-- [[1,2,3],[2,3,4],[3,4,5],[4,5,6]]</span><span>
 </span><span id="line-346"></span><span id="local-6989586621679098767"><span id="local-6989586621679098768"><span id="local-6989586621679098769"><span class="annot"><a href="Data.Conduino.Combinators.html#consecutive"><span class="hs-identifier hs-type">consecutive</span></a></span><span> </span><span class="hs-glyph">::</span><span> </span><span class="annot"><span class="hs-identifier hs-type">Int</span></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><a href="Data.Conduino.Internal.html#Pipe"><span class="hs-identifier hs-type">Pipe</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679098769"><span class="hs-identifier hs-type">i</span></a></span><span> </span><span class="hs-special">(</span><span class="annot"><span class="hs-identifier hs-type">Seq.Seq</span></span><span> </span><span class="annot"><a href="#local-6989586621679098769"><span class="hs-identifier hs-type">i</span></a></span><span class="hs-special">)</span><span> </span><span class="annot"><a href="#local-6989586621679098768"><span class="hs-identifier hs-type">u</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679098767"><span class="hs-identifier hs-type">m</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679098768"><span class="hs-identifier hs-type">u</span></a></span></span></span></span><span>
 </span><span id="line-347"></span><span id="consecutive"><span class="annot"><span class="annottext">consecutive :: Int -&gt; Pipe i (Seq i) u m u
@@ -823,11 +823,11 @@ forall a. Seq a -&gt; a -&gt; Seq a
 </span><span id="line-356"></span><span class="hs-comment">--</span><span>
 </span><span id="line-357"></span><span class="hs-comment">-- This is most useful if you sequence a second conduit after it.</span><span>
 </span><span id="line-358"></span><span class="hs-comment">--</span><span>
-</span><span id="line-359"></span><span class="hs-comment">-- &gt;&gt;&gt; 'runPipePure' $ 'sourceList' [1..8]</span><span>
-</span><span id="line-360"></span><span class="hs-comment">--       '.'| (do 'take' 3 .| 'map' (*2)         -- double the first 3 items</span><span>
-</span><span id="line-361"></span><span class="hs-comment">--              'map' negate                 -- negate the rest</span><span>
+</span><span id="line-359"></span><span class="hs-comment">-- &gt;&gt;&gt; runPipePure $ sourceList [1..8]</span><span>
+</span><span id="line-360"></span><span class="hs-comment">--       .| (do take 3 .| map (*2)         -- double the first 3 items</span><span>
+</span><span id="line-361"></span><span class="hs-comment">--              map negate                 -- negate the rest</span><span>
 </span><span id="line-362"></span><span class="hs-comment">--          )</span><span>
-</span><span id="line-363"></span><span class="hs-comment">--       .| 'sinkList'</span><span>
+</span><span id="line-363"></span><span class="hs-comment">--       .| sinkList</span><span>
 </span><span id="line-364"></span><span class="hs-comment">-- [2,4,6,-4,-5,-6,-7,-8]</span><span>
 </span><span id="line-365"></span><span id="local-6989586621679098755"><span id="local-6989586621679098756"><span id="local-6989586621679098757"><span class="annot"><a href="Data.Conduino.Combinators.html#take"><span class="hs-identifier hs-type">take</span></a></span><span> </span><span class="hs-glyph">::</span><span> </span><span class="annot"><span class="hs-identifier hs-type">Int</span></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><a href="Data.Conduino.Internal.html#Pipe"><span class="hs-identifier hs-type">Pipe</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679098757"><span class="hs-identifier hs-type">i</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679098757"><span class="hs-identifier hs-type">i</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679098756"><span class="hs-identifier hs-type">u</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679098755"><span class="hs-identifier hs-type">m</span></a></span><span> </span><span class="hs-special">(</span><span class="hs-special">)</span></span></span></span><span>
 </span><span id="line-366"></span><span id="take"><span class="annot"><span class="annottext">take :: Int -&gt; Pipe i i u m ()
@@ -1083,8 +1083,8 @@ forall a b o u (m :: * -&gt; *). (a -&gt; b -&gt; b) -&gt; b -&gt; Pipe a o u m 
 </span><span id="line-453"></span><span class="hs-comment">--</span><span>
 </span><span id="line-454"></span><span class="hs-comment">-- This is most useful if you sequence a second consumer after it:</span><span>
 </span><span id="line-455"></span><span class="hs-comment">--</span><span>
-</span><span id="line-456"></span><span class="hs-comment">-- &gt;&gt;&gt; 'runPipePure' $ 'sourceList' [1..8]</span><span>
-</span><span id="line-457"></span><span class="hs-comment">--       '.|' ('drop' 3 &gt;&gt; 'sinkList')</span><span>
+</span><span id="line-456"></span><span class="hs-comment">-- &gt;&gt;&gt; runPipePure $ sourceList [1..8]</span><span>
+</span><span id="line-457"></span><span class="hs-comment">--       .| (drop 3 &gt;&gt; 'sinkList')</span><span>
 </span><span id="line-458"></span><span class="hs-comment">-- [4,5,6,7,8]</span><span>
 </span><span id="line-459"></span><span id="local-6989586621679098705"><span id="local-6989586621679098706"><span id="local-6989586621679098707"><span id="local-6989586621679098708"><span class="annot"><a href="Data.Conduino.Combinators.html#drop"><span class="hs-identifier hs-type">drop</span></a></span><span> </span><span class="hs-glyph">::</span><span> </span><span class="annot"><span class="hs-identifier hs-type">Int</span></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><a href="Data.Conduino.Internal.html#Pipe"><span class="hs-identifier hs-type">Pipe</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679098708"><span class="hs-identifier hs-type">i</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679098707"><span class="hs-identifier hs-type">o</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679098706"><span class="hs-identifier hs-type">u</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679098705"><span class="hs-identifier hs-type">m</span></a></span><span> </span><span class="hs-special">(</span><span class="hs-special">)</span></span></span></span></span><span>
 </span><span id="line-460"></span><span id="drop"><span class="annot"><span class="annottext">drop :: Int -&gt; Pipe i o u m ()
