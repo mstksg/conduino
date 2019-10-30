@@ -100,7 +100,18 @@ for an `await` that will *always* return a value.  That is because `u` is the
 type of the upstream pipe's result, but if `u` is `Void`, it means that the
 upstream pipe will never finish with a result, and keep producing forever.
 
-## Why not pipes or conduit?
+## Why does this package exist?
+
+This package is taking some code I've used some closed-source projects and
+pulling it out as a full library.  I wrote it, despite the existence of *pipes*
+and *conduit*, because:
+
+1.  I wanted conduit-style semantics for stream composition (source - producer -
+    sink all in one package).
+3.  I wanted type-enforced guaranteed "awaits" based on type-enforced
+    guaranteed infinite producers.
+2.  I wanted something lightweight without the dependencies dealing with IO,
+    since I wasn't really doing resource-sensitive IO.
 
 *conduino* is a small, lightweight version that is focused not necessarily on
 "effects" streaming, but rather on composable bits of logic.  It is basically a
