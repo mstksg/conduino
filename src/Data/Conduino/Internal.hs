@@ -91,6 +91,23 @@ makeFree ''PipeF
 --    will never stop, so you can use 'Data.Conduino.awaitSurely' to get
 --    a guaranteed answer.
 --
+-- Applicative and Monadic sequencing of pipes chains by exhaustion.
+--
+-- @
+-- do pipeX
+--    pipeY
+--    pipeZ
+-- @
+--
+-- is a pipe itself, that behaves like @pipeX@ until it terminates, then
+-- @pipeY@ until it terminates, then @pipeZ@ until it terminates.  The
+-- 'Monad' instance allows you to choose "which pipe to behave like next"
+-- based on the terminating result of a previous pipe.
+--
+-- @
+-- do x <- pipeX
+--    pipeBasedOn x
+-- @
 --
 -- Usually you would use it by chaining together pipes with
 -- 'Data.Condunio..|' and then running the result with

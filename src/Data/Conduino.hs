@@ -22,6 +22,40 @@
 --
 -- A "prelude" of useful pipes can be found in "Data.Conduino.Combinators".
 --
+-- == Why a stream processing library?
+-- 
+-- A stream processing library is a way to stream processors in a /composable/ way:
+-- instead of defining your entire stream processing function as a single
+-- recursive loop with some global state, instead think about each "stage" of the process,
+-- and isolate each state to its own segment.  Each component can contain its own
+-- isolated state:
+-- 
+-- >>> 'runPipePure' $ 'Data.Conduino.Combinators.sourceList' [1..10]
+--       '.|' 'Data.Conduino.Combinators.scan' (+) 0
+--       .| 'Data.Condunio.Combinators.sinkList'
+-- [1,3,6,10,15,21,28,36,45,55]
+-- 
+-- All of these components have internal "state":
+-- 
+-- *   @sourceList@ keeps track of "which" item in the list to yield next
+-- *   @scan@ keeps track of the current running sum
+-- *   @sinkList@ keeps track of all items that have been seen so far, as a list
+-- 
+-- They all work together without knowing any other component's internal state, so
+-- you can write your total streaming function without concerning yourself, at
+-- each stage, with the entire part.
+-- 
+-- In addition, there are useful functions to "combine" stream processors:
+-- 
+-- *   'zipSink' combines sinks in an "and" sort of way: combine two sinks in
+--     parallel and finish when all finish.
+-- *   'altSink' combines sinks in an "or" sort of way: combine two sinks in
+--     parallel and finish when any of them finish
+-- *   'zipSource' combines sources in parallel and collate their outputs.
+-- 
+-- Stream processing libraries are also useful for streaming composition of
+-- monadic effects (like IO or State), as well.
+--
 module Data.Conduino (
     Pipe
   , (.|)
