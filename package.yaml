@@ -5,6 +5,7 @@ license:             BSD3
 author:              "Justin Le"
 maintainer:          "justin@jle.im"
 copyright:           "(c) Justin Le 2019"
+tested-with:         GHC >= 8.4 && < 8.10
 
 extra-source-files:
 - README.md
@@ -13,10 +14,13 @@ extra-source-files:
 synopsis:            Lightweight composable continuation-based stream processors
 category:            Control
 
-# To avoid duplicated efforts in documentation and dealing with the
-# complications of embedding Haddock markup inside cabal files, it is
-# common to point users to the README.md file.
-description:         Please see the README on GitHub at <https://github.com/mstksg/conduino#readme>
+description: |
+  A lightweight continuation-based stream processing library.
+  
+  It is similar in nature to pipes and conduit, but useful if you just want
+  something quick to manage composable stream processing without focus on IO.
+
+  See README for more information.
 
 ghc-options:
 - -Wall
@@ -25,7 +29,7 @@ ghc-options:
 - -Werror=incomplete-patterns
 
 dependencies:
-- base >= 4.7 && < 5
+- base >= 4.11 && < 5
 
 library:
   source-dirs: src

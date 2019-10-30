@@ -3,9 +3,7 @@
 A lightweight continuation-based stream processing library.
 
 It is similar in nature to pipes and conduit, but useful if you just want
-something quick to manage stream processing.  There aren't much facilities for
-IO --- you can implement IO stream processing if you want on top of the core
-functionality.
+something quick to manage composable stream processing without focus on IO.
 
 ## Why a stream processing library?
 

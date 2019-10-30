@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP                        #-}
 {-# LANGUAGE DeriveFunctor              #-}
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
@@ -38,6 +39,10 @@ import           Control.Monad.Free.TH
 import           Control.Monad.RWS
 import           Control.Monad.Trans.Free        (FreeT(..))
 import           Control.Monad.Trans.Free.Church
+
+#if !MIN_VERSION_base(4,13,0)
+import           Control.Monad.Fail
+#endif
 
 -- | Base functor of 'Pipe'.
 --
@@ -149,7 +154,11 @@ newtype Pipe i o u m a = Pipe { pipeFree :: FT (PipeF i o u) m a }
     )
 
 instance MonadFail m => MonadFail (Pipe i o u m) where
+#if MIN_VERSION_base(4,13,0)
     fail = lift . fail
+#else
+    fail = lift . Control.Monad.Fail.fail
+#endif
 
 -- | Await on upstream output.  Will block until it receives an @i@
 -- (expected input type) or a @u@ if the upstream pipe terminates.
