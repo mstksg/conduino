@@ -19,29 +19,39 @@ module Data.Conduino.Internal
 --   For a <tt><a>Pipe</a> i o u m a</tt>, you have:
 --   
 --   <ul>
---   <li><tt>i</tt>: Type of input stream</li>
---   <li><tt>o</tt>: Type of output stream</li>
+--   <li><tt>i</tt>: Type of input stream (the things you can
+--   <a>await</a>)</li>
+--   <li><tt>o</tt>: Type of output stream (the things you
+--   <a>yield</a>)</li>
 --   <li><tt>u</tt>: Type of the <i>result</i> of the upstream pipe
---   (Outputted when upstream pipe finishes)</li>
---   <li><tt>m</tt>: Underlying monad</li>
---   <li><tt>a</tt>: Result type (Outputted when finished)</li>
+--   (Outputted when upstream pipe terminates)</li>
+--   <li><tt>m</tt>: Underlying monad (the things you can <a>lift</a>)</li>
+--   <li><tt>a</tt>: Result type when pipe terminates (outputted when
+--   finished, with <a>pure</a> or <a>return</a>)</li>
 --   </ul>
 --   
 --   Some specializations:
 --   
 --   <ul>
---   <li>A pipe is a <i>source</i> if <tt>i</tt> is <tt>()</tt>: it doesn't
---   need anything to go pump out items. If a pipe is source and <tt>a</tt>
---   is <a>Void</a>, it means that it will produce forever.</li>
---   <li>A pipe is a <i>sink</i> if <tt>o</tt> is <a>Void</a>: it will
---   never yield anything else downstream.</li>
---   <li>If a pipe is both a source and a sink, it is an
---   <i>effect</i>.</li>
---   <li>Normally you can ask for input upstream with <a>await</a>, which
---   returns <a>Nothing</a> if the pipe upstream stops producing. However,
---   if <tt>u</tt> is <a>Void</a>, it means that the pipe upstream will
---   never stop, so you can use <a>awaitSurely</a> to get a guaranteed
---   answer.</li>
+--   <li>If <tt>i</tt> is <tt>()</tt>, the pipe is a <i>source</i> --- it
+--   doesn't need anything to produce items. It will pump out items on its
+--   own, for pipes downstream to receive and process.</li>
+--   <li>If <tt>o</tt> is <tt>Void</tt><tt>, the pipe is a <i>sink</i> ---
+--   it will never <a>yield</a> anything downstream. It will consume items
+--   from things upstream, and produce a result (</tt>a@) if and when it
+--   terminates.</li>
+--   <li>If <tt>u</tt> is <tt>Void</tt>, then the pipe's upstream is
+--   limitless, and never terminates. This means that you can use
+--   <a>awaitSurely</a> instead of <a>await</a>, to get await a value that
+--   is guaranteed to come. You'll get an <tt>i</tt> instead of a
+--   <tt><a>Maybe</a> i</tt>.</li>
+--   <li>If <tt>a</tt> is <tt>Void</tt>, then the pipe never terminates ---
+--   it will keep on consuming and/or producing values forever. If this is
+--   a sink, it means that the sink will never terminate, and so
+--   <a>runPipe</a> will also never terminate. If it is a source, it means
+--   that if you chain something downstream with <a>.|</a>, that downstream
+--   pipe can use <tt>awaitSurely</tt> to gaurantee something being passed
+--   down.</li>
 --   </ul>
 --   
 --   Applicative and Monadic sequencing of pipes chains by exhaustion.
@@ -175,9 +185,9 @@ instance GHC.Base.Functor (Data.Conduino.Internal.PipeF i o u)
 --   state:
 --   
 --   <pre>
---   &gt;&gt;&gt; 'runPipePure' $ 'Data.Conduino.Combinators.sourceList' [1..10]
---         '.|' 'Data.Conduino.Combinators.scan' (+) 0
---         .| 'Data.Condunio.Combinators.sinkList'
+--   &gt;&gt;&gt; runPipePure $ sourceList [1..10]
+--         .| scan (+) 0
+--         .| sinkList
 --   [1,3,6,10,15,21,28,36,45,55]
 --   </pre>
 --   
@@ -216,29 +226,39 @@ module Data.Conduino
 --   For a <tt><a>Pipe</a> i o u m a</tt>, you have:
 --   
 --   <ul>
---   <li><tt>i</tt>: Type of input stream</li>
---   <li><tt>o</tt>: Type of output stream</li>
+--   <li><tt>i</tt>: Type of input stream (the things you can
+--   <a>await</a>)</li>
+--   <li><tt>o</tt>: Type of output stream (the things you
+--   <a>yield</a>)</li>
 --   <li><tt>u</tt>: Type of the <i>result</i> of the upstream pipe
---   (Outputted when upstream pipe finishes)</li>
---   <li><tt>m</tt>: Underlying monad</li>
---   <li><tt>a</tt>: Result type (Outputted when finished)</li>
+--   (Outputted when upstream pipe terminates)</li>
+--   <li><tt>m</tt>: Underlying monad (the things you can <a>lift</a>)</li>
+--   <li><tt>a</tt>: Result type when pipe terminates (outputted when
+--   finished, with <a>pure</a> or <a>return</a>)</li>
 --   </ul>
 --   
 --   Some specializations:
 --   
 --   <ul>
---   <li>A pipe is a <i>source</i> if <tt>i</tt> is <tt>()</tt>: it doesn't
---   need anything to go pump out items. If a pipe is source and <tt>a</tt>
---   is <a>Void</a>, it means that it will produce forever.</li>
---   <li>A pipe is a <i>sink</i> if <tt>o</tt> is <a>Void</a>: it will
---   never yield anything else downstream.</li>
---   <li>If a pipe is both a source and a sink, it is an
---   <i>effect</i>.</li>
---   <li>Normally you can ask for input upstream with <a>await</a>, which
---   returns <a>Nothing</a> if the pipe upstream stops producing. However,
---   if <tt>u</tt> is <a>Void</a>, it means that the pipe upstream will
---   never stop, so you can use <a>awaitSurely</a> to get a guaranteed
---   answer.</li>
+--   <li>If <tt>i</tt> is <tt>()</tt>, the pipe is a <i>source</i> --- it
+--   doesn't need anything to produce items. It will pump out items on its
+--   own, for pipes downstream to receive and process.</li>
+--   <li>If <tt>o</tt> is <tt>Void</tt><tt>, the pipe is a <i>sink</i> ---
+--   it will never <a>yield</a> anything downstream. It will consume items
+--   from things upstream, and produce a result (</tt>a@) if and when it
+--   terminates.</li>
+--   <li>If <tt>u</tt> is <tt>Void</tt>, then the pipe's upstream is
+--   limitless, and never terminates. This means that you can use
+--   <a>awaitSurely</a> instead of <a>await</a>, to get await a value that
+--   is guaranteed to come. You'll get an <tt>i</tt> instead of a
+--   <tt><a>Maybe</a> i</tt>.</li>
+--   <li>If <tt>a</tt> is <tt>Void</tt>, then the pipe never terminates ---
+--   it will keep on consuming and/or producing values forever. If this is
+--   a sink, it means that the sink will never terminate, and so
+--   <a>runPipe</a> will also never terminate. If it is a source, it means
+--   that if you chain something downstream with <a>.|</a>, that downstream
+--   pipe can use <tt>awaitSurely</tt> to gaurantee something being passed
+--   down.</li>
 --   </ul>
 --   
 --   Applicative and Monadic sequencing of pipes chains by exhaustion.
@@ -368,10 +388,22 @@ await :: Pipe i o u m (Maybe i)
 --   was succesful.
 --   
 --   The await will always be succesful if <tt>u</tt> is <a>Void</a>.
+--   
+--   This is a way of writing code in a way that is agnostic to how the
+--   upstream pipe terminates.
 awaitWith :: (i -> Pipe i o u m u) -> Pipe i o u m u
 
 -- | Await input from upstream where the upstream pipe is guaranteed to
 --   never terminate.
+--   
+--   A common type error will occur if <tt>u</tt> (upstream pipe result
+--   type) is not <a>Void</a> -- it might be <tt>()</tt> or some
+--   non-<a>Void</a> type. This means that the upstream pipe terminates, so
+--   awaiting cannot be assured.
+--   
+--   In that case, either change your upstream pipe to be one that never
+--   terminates (which is most likely not possible), or use <a>await</a>
+--   instead of <a>awaitSurely</a>.
 awaitSurely :: Pipe i o Void m i
 
 -- | A useful utility function over repeated <a>await</a>s. Will repeatedly
