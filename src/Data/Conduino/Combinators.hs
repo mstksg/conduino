@@ -141,18 +141,18 @@ iterateMaybe f = unfoldMaybe (fmap (join (,)) . f)
 -- | Repeatedly apply a function to a given starting value and yield each
 -- result forever.
 --
--- >>> 'runPipePure' $ 'iterate' succ 0
---       '.'| 'take' 5
---       .| 'sinkList'
+-- >>> runPipePure $ iterate succ 0
+--       .| take 5
+--       .| sinkList
 --
 -- [1,2,3,4,5]
 --
 -- This doesn't yield the original starting value.  However, you can yield
 -- it iterate after:
 --
--- >>> 'runPipePure' $ ('yield' 0 >> 'iterate' succ 0)
---       '.'| 'take' 5
---       .| 'sinkList'
+-- >>> runPipePure $ (yield 0 >> iterate succ 0)
+--       .| take 5
+--       .| sinkList
 --
 -- [0,1,2,3,4,5]
 iterate
@@ -298,9 +298,9 @@ mapAccum f = go
 
 -- | Like 'foldl', but yields every accumulator value downstream.
 --
--- >>> 'runPipePure' $ 'sourceList' [1..10]
---       .| 'scan' (+) 0
---       .| 'sinkList'
+-- >>> runPipePure $ sourceList [1..10]
+--       .| scan (+) 0
+--       .| sinkList
 -- [1,3,6,10,15,21,28,36,45,55]
 -- @
 scan
@@ -315,9 +315,9 @@ scan f = go
 
 -- | Yield consecutive pairs of values.
 --
--- >>> 'runPipePure' $ 'sourceList' [1..5]
---       '.|' 'pairs'
---       .| 'sinkList'
+-- >>> runPipePure $ sourceList [1..5]
+--       .| pairs
+--       .| sinkList
 -- [(1,2),(2,3),(3,4),(4,5)]
 pairs :: Pipe i (i, i) u m u
 pairs = awaitWith go
@@ -331,17 +331,17 @@ pairs = awaitWith go
 --
 -- To get only "full" sequences, pipe with 'filter'.
 --
--- >>> 'runPipePure' $ 'sourceList' [1..6]
---       '.|' 'consecutive' 3
---       .| 'map' 'toList'
---       .| 'sinkList
+-- >>> runPipePure $ sourceList [1..6]
+--       .| consecutive 3
+--       .| map toList
+--       .| sinkList
 -- [[],[1],[1,2],[1,2,3],[2,3,4],[3,4,5],[4,5,6]]
 --
--- >>> 'runPipePure' $ 'sourceList' [1..6]
---       '.|' 'consecutive' 3
---       .| 'filter' (('==' 3) . 'Seq.length')
---       .| 'map' 'toList'
---       .| 'sinkList
+-- >>> runPipePure $ sourceList [1..6]
+--       .| consecutive 3
+--       .| filter ((== 3) . Seq.length)
+--       .| map toList
+--       .| sinkList
 -- [[1,2,3],[2,3,4],[3,4,5],[4,5,6]]
 consecutive :: Int -> Pipe i (Seq.Seq i) u m u
 consecutive n = go Seq.empty
@@ -356,11 +356,11 @@ consecutive n = go Seq.empty
 --
 -- This is most useful if you sequence a second conduit after it.
 --
--- >>> 'runPipePure' $ 'sourceList' [1..8]
---       '.'| (do 'take' 3 .| 'map' (*2)         -- double the first 3 items
---              'map' negate                 -- negate the rest
+-- >>> runPipePure $ sourceList [1..8]
+--       .| (do take 3 .| map (*2)         -- double the first 3 items
+--              map negate                 -- negate the rest
 --          )
---       .| 'sinkList'
+--       .| sinkList
 -- [2,4,6,-4,-5,-6,-7,-8]
 take :: Int -> Pipe i i u m ()
 take n = void . runMaybeT . replicateM_ n $
@@ -453,8 +453,8 @@ sinkList = foldr (:) []
 --
 -- This is most useful if you sequence a second consumer after it:
 --
--- >>> 'runPipePure' $ 'sourceList' [1..8]
---       '.|' ('drop' 3 >> 'sinkList')
+-- >>> runPipePure $ sourceList [1..8]
+--       .| (drop 3 >> 'sinkList')
 -- [4,5,6,7,8]
 drop :: Int -> Pipe i o u m ()
 drop n = replicateM_ n await

@@ -1,5 +1,5 @@
 name:                conduino
-version:             0.1.0.0
+version:             0.2.0.0
 github:              "mstksg/conduino"
 license:             BSD3
 author:              "Justin Le"
@@ -16,7 +16,7 @@ category:            Control
 
 description: |
   A lightweight continuation-based stream processing library.
-  
+
   It is similar in nature to pipes and conduit, but useful if you just want
   something quick to manage composable stream processing without focus on IO.
 

@@ -6,7 +6,7 @@ Version 0.2.0.0
 
 *October 30, 2019*
 
-<https://github.com/mstksg/backprop/releases/tag/v0.2.0.0>
+<https://github.com/mstksg/conduino/releases/tag/v0.2.0.0>
 
 *   Initial release
 
