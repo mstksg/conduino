@@ -4,8 +4,13 @@
 
 -- | Lightweight composable continuation-based stream processors
 --   
---   Please see the README on GitHub at
---   <a>https://github.com/mstksg/conduino#readme</a>
+--   A lightweight continuation-based stream processing library.
+--   
+--   It is similar in nature to pipes and conduit, but useful if you just
+--   want something quick to manage composable stream processing without
+--   focus on IO.
+--   
+--   See README for more information.
 @package conduino
 @version 0.1.0.0
 
