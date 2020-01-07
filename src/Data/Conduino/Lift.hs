@@ -108,6 +108,8 @@ import qualified Control.Monad.Trans.Writer.Strict as WS
 -- the @s@ that it gets when it terminates.  If any other pipe in this
 -- chain modifies or uses state, all modifications will be overwritten when
 -- the @(a, s)@-producing pipe terminates.
+--
+-- @since 0.2.1.0
 stateP
     :: Monad m
     => (s -> Pipe i o u m (a, s))
@@ -119,6 +121,8 @@ stateP f = do
 
 -- | Like 'runStateP', but ignoring the final result.  It returns the final
 -- state after the pipe succesfuly terminates.
+--
+-- @since 0.2.1.0
 execStateP
     :: Monad m
     => s
@@ -134,6 +138,8 @@ execStateP s = fmap snd . runStateP s
 -- This can be cleaner than 'runStateP' because if @a@ is @()@, you
 -- don't have to sprinkle in 'void' everywhere.  However, it's only really
 -- useful if you don't need to get the final state upon termination.
+--
+-- @since 0.2.1.0
 evalStateP
     :: Monad m
     => s
@@ -142,6 +148,8 @@ evalStateP
 evalStateP s = fmap fst . runStateP s
 
 -- | 'stateP', but for "Control.Monad.Trans.State.Strict".
+--
+-- @since 0.2.1.0
 statePS
     :: Monad m
     => (s -> Pipe i o u m (a, s))
@@ -152,6 +160,8 @@ statePS f = do
     x <$ lift (SS.put s')
 
 -- | 'runStateP', but for "Control.Monad.Trans.State.Strict".
+--
+-- @since 0.2.1.0
 runStatePS
     :: Monad m
     => s
@@ -165,6 +175,8 @@ runStatePS = withRecPipe . go
         Free l -> Free $ go s' <$> l
 
 -- | 'execStateP', but for "Control.Monad.Trans.State.Strict".
+--
+-- @since 0.2.1.0
 execStatePS
     :: Monad m
     => s
@@ -173,6 +185,8 @@ execStatePS
 execStatePS s = fmap snd . runStatePS s
 
 -- | 'evalStateP', but for "Control.Monad.Trans.State.Strict".
+--
+-- @since 0.2.1.0
 evalStatePS
     :: Monad m
     => s
@@ -186,6 +200,8 @@ evalStatePS s = fmap fst . runStatePS s
 -- "succesfully" terminates with 'Left'.  It would never happen before the
 -- pipe terminates, since you don't get the @'Either' e a@ until the pipe
 -- succesfully terminates.
+--
+-- @since 0.2.1.0
 exceptP
     :: Monad m
     => Pipe i o u m (Either e a)
@@ -237,6 +253,8 @@ exceptP p = hoistPipe lift p >>= \case
 -- 'ExceptT' internally.
 --
 -- Note to avoid the usage of 'void', 'runExceptP_' might be more useful.
+--
+-- @since 0.2.1.0
 runExceptP
     :: Monad m
     => Pipe i o u (ExceptT e m) a
@@ -251,6 +269,8 @@ runExceptP = withRecPipe go
 -- | A handy version of 'runExceptP' that discards its output, so it can be
 -- easier to chain using '.|'.  It's useful if you are using 'runExceptP'
 -- to "isolate" failures from the rest of a chain.
+--
+-- @since 0.2.1.0
 runExceptP_
     :: Monad m
     => Pipe i o u (ExceptT e m) a
@@ -265,6 +285,8 @@ runExceptP_ = void . runExceptP
 -- "succesfully" terminates with 'Left'.  It would never happen before the
 -- pipe terminates, since you don't get the @'Either' 'SomeException' a@
 -- until the pipe succesfully terminates.
+--
+-- @since 0.2.1.0
 catchP
     :: Monad m
     => Pipe i o u m (Either SomeException a)
@@ -276,6 +298,8 @@ catchP p = hoistPipe lift p >>= \case
 -- | Like 'runExceptP', but for 'CatchT'.  See 'runExceptP' for usage
 -- details.  In general, can be useful for "isolating" a 'CatchT' pipe from
 -- the rest of its chain.
+--
+-- @since 0.2.1.0
 runCatchP
     :: Monad m
     => Pipe i o u (CatchT m) a
@@ -292,6 +316,8 @@ runCatchP = withRecPipe go
 --
 -- Essentially, instead of directly providing the @r@ in an @r -> 'Pipe'
 -- i o u m a@, the @r@ instead comes from the globally shared environment.
+--
+-- @since 0.2.1.0
 readerP
     :: Monad m
     => (r -> Pipe i o u m a)
@@ -304,6 +330,8 @@ readerP f = hoistPipe lift . f =<< lift ask
 --
 -- It can be useful to "ignore" a globally shared environment and just give
 -- the @r@ directly and immediately.
+--
+-- @since 0.2.1.0
 runReaderP
     :: Monad m
     => r
@@ -323,6 +351,8 @@ runReaderP r = hoistPipe (`runReaderT` r)
 -- logging (logging things as you get them), you should probably just
 -- directly use 'WriterT' instead, with 'Data.Conduino.Combinators.repeatM'
 -- or 'Data.Conduino.Combinators.iterM' or something similar.
+--
+-- @since 0.2.1.0
 writerP
     :: (Monad m, Monoid w)
     => Pipe i o u m (a, w)
@@ -372,6 +402,8 @@ writerP p = do
 --
 -- And @a@ and @b@ will be none the wiser to the fact that @q@ uses
 -- 'WriterT' internally.
+--
+-- @since 0.2.1.0
 runWriterP
     :: (Monad m, Monoid w)
     => Pipe i o u (WriterT w m) a
@@ -385,6 +417,8 @@ runWriterP = withRecPipe (go mempty)
 
 -- | 'runWriterP', but only returning the final log after succesful
 -- termination.
+--
+-- @since 0.2.1.0
 execWriterP
     :: (Monad m, Monoid w)
     => Pipe i o u (WriterT w m) a
@@ -392,6 +426,8 @@ execWriterP
 execWriterP = fmap snd . runWriterP
 
 -- | 'writerP', but for "Control.Monad.Trans.Writer.Strict".
+--
+-- @since 0.2.1.0
 writerPS
     :: (Monad m, Monoid w)
     => Pipe i o u m (a, w)
@@ -401,6 +437,8 @@ writerPS p = do
     x <$ lift (WS.tell w)
 
 -- | 'runWriterP', but for "Control.Monad.Trans.Writer.Strict".
+--
+-- @since 0.2.1.0
 runWriterPS
     :: (Monad m, Monoid w)
     => Pipe i o u (WS.WriterT w m) a
@@ -413,6 +451,8 @@ runWriterPS = withRecPipe (go mempty)
         Free l -> Free $ go w' <$> l
 
 -- | 'execWriterP', but for "Control.Monad.Trans.Writer.Strict".
+--
+-- @since 0.2.1.0
 execWriterPS
     :: (Monad m, Monoid w)
     => Pipe i o u (WriterT w m) a
@@ -431,6 +471,8 @@ execWriterPS = fmap snd . runWriterP
 -- *  When the @(a,s,w)@-returning pipe terminates, whatever state in the
 --    'RWST' is overwritten with the @s@ returned.  If other pipes in the
 --    chain modify the @s@, their modifications will be overwritten.
+--
+-- @since 0.2.1.0
 rwsP
     :: (Monad m, Monoid w)
     => (r -> s -> Pipe i o u m (a, s, w))
@@ -445,6 +487,8 @@ rwsP f = do
 -- | Turn a 'Pipe' that runs over 'RWST' into a state-modifying,
 -- environment-using, log-accumulating 'Pipe'.  See 'runStateP',
 -- 'runWriterP', and 'runReaderP' for the uses and semantics.
+--
+-- @since 0.2.1.0
 runRWSP
     :: (Monad m, Monoid w)
     => r
@@ -459,6 +503,8 @@ runRWSP r = withRecPipe . go mempty
         Free l -> Free $ go w' s' <$> l
 
 -- | 'runRWSP', but ignoring the final state.
+--
+-- @since 0.2.1.0
 evalRWSP
     :: (Monad m, Monoid w)
     => r
@@ -468,6 +514,8 @@ evalRWSP
 evalRWSP r s = fmap (\(x,_,w) -> (x,w)) . runRWSP r s
 
 -- | 'runRWSP', but ignoring the result value.
+--
+-- @since 0.2.1.0
 execRWSP
     :: (Monad m, Monoid w)
     => r
@@ -477,6 +525,8 @@ execRWSP
 execRWSP r s = fmap (\(_,s',w) -> (s',w)) . runRWSP r s
 
 -- | 'rwsP', but for "Control.Monad.Trans.RWS.Strict".
+--
+-- @since 0.2.1.0
 rwsPS
     :: (Monad m, Monoid w)
     => (r -> s -> Pipe i o u m (a, s, w))
@@ -489,6 +539,8 @@ rwsPS f = do
     x <$ lift (RWSS.put s')
 
 -- | 'runRWSPS', but for "Control.Monad.Trans.RWS.Strict".
+--
+-- @since 0.2.1.0
 runRWSPS
     :: (Monad m, Monoid w)
     => r
@@ -503,6 +555,8 @@ runRWSPS r = withRecPipe . go mempty
         Free l -> Free $ go w' s' <$> l
 
 -- | 'evalRWSPS', but for "Control.Monad.Trans.RWS.Strict".
+--
+-- @since 0.2.1.0
 evalRWSPS
     :: (Monad m, Monoid w)
     => r
@@ -512,6 +566,8 @@ evalRWSPS
 evalRWSPS r s = fmap (\(x,_,w) -> (x,w)) . runRWSPS r s
 
 -- | 'execRWSPS', but for "Control.Monad.Trans.RWS.Strict".
+--
+-- @since 0.2.1.0
 execRWSPS
     :: (Monad m, Monoid w)
     => r

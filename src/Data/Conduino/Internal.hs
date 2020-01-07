@@ -291,6 +291,8 @@ withRecPipe f = fromRecPipe . f . toRecPipe
 --
 -- Note to avoid the usage of 'void', 'Data.Conduino.Lift.evalStateP' might
 -- be more useful.
+--
+-- @since 0.2.1.0
 runStateP
     :: Monad m
     => s

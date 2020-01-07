@@ -1,3 +1,5 @@
 .stack-work/
 conduino.cabal
+dist-newstyle
+.ghc.environment*
 *~
