@@ -241,6 +241,48 @@ withRecPipe
     -> Pipe j p v n b
 withRecPipe f = fromRecPipe . f . toRecPipe
 
+-- | Turn a 'Pipe' that runs over 'StateT' into a "state-modifying 'Pipe'",
+-- that returns the final state when it terminates.
+--
+-- The main usage of this is to "isolate" the state from other pipes in the
+-- same chain.  For example, of @p@, @q@, and @r@ are all pipes under
+-- 'StateT', then:
+--
+-- @
+--     p
+--  .| q
+--  .| r
+-- @
+--
+-- will all share underlying state, and each can modify the state that they
+-- all three share.  We essentially have global state.
+--
+-- However, if you use 'runStateP', you can all have them use different
+-- encapsulated states.
+--
+-- @
+--     void (runStateP s0 p)
+--  .| void (runStateP s1 q)
+--  .| runStateP s2 r
+-- @
+--
+-- In this case, each of those three chained pipes will use their own
+-- internal states, without sharing.
+--
+-- This is also useful if you want to chain a pipe over 'StateT' with
+-- pipes that don't use state at all: for example if @a@ and @b@ are
+-- "non-stateful" pipes (/not/ over 'StateT'), you can do:
+--
+-- @
+--     a
+--  .| void (runStateP s1 q)
+--  .| b
+-- @
+--
+-- And @a@ and @b@ will be none the wiser to the fact that @q@ uses
+-- 'StateT' internally.
+--
+-- Note to avoid the usage of 'void', 'evalStateP' might be more useful.
 runStateP
     :: Monad m
     => s
