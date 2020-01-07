@@ -61,17 +61,22 @@ module Data.Conduino (
     Pipe
   , (.|)
   , runPipe, runPipePure
+  -- * Primitives
   , awaitEither, await, awaitWith, awaitSurely, awaitForever, yield
-  , mapInput, mapOutput, mapUpRes, trimapPipe
+  -- * Special chaining
+  , (&|), (|.)
+  , fuseBoth, fuseUpstream, fuseBothMaybe
   -- * Incremental running
   , squeezePipe, squeezePipeEither
   , feedPipe, feedPipeEither
   -- * Pipe transformers
+  , mapInput, mapOutput, mapUpRes, trimapPipe
   , hoistPipe
   , feedbackPipe
   -- * Wrappers
   , ZipSource(..)
   , unconsZipSource
+  , zipSource
   , ZipSink(..)
   , zipSink, altSink
   -- * Generators
@@ -210,6 +215,8 @@ runPipePure = runIdentity . runPipe
 -- Returns the outputs observed, and 'Left' if the input list was exhausted
 -- with more input expected, or 'Right' if the pipe terminated, with the
 -- leftover inputs and output result.
+--
+-- @since 0.2.1.0
 feedPipe
     :: Monad m
     => [i]
@@ -223,6 +230,8 @@ feedPipe xs = (fmap . second . first) (. Right)
 -- exhausted with more input expected (or a @u@ terminating upstream
 -- value), or 'Right' if the pipe terminated, with the leftover inputs and
 -- output result.
+--
+-- @since 0.2.1.0
 feedPipeEither
     :: Monad m
     => [i]
@@ -240,6 +249,8 @@ feedPipeEither xs p = do
 -- before any input is requested.  Returns a 'Left' if the pipe eventually
 -- does request input (as a continuation on the new input), or a 'Right' if
 -- the pipe terminates with a value before ever asking for input.
+--
+-- @since 0.2.1.0
 squeezePipe
     :: Monad m
     => Pipe i o u m a
@@ -252,6 +263,8 @@ squeezePipe = (fmap . second . first) (. Right)
 -- request input (as a continuation on the new input, or a terminating @u@
 -- value), or a 'Right' if the pipe terminates with a value before ever
 -- asking for input.
+--
+-- @since 0.2.1.0
 squeezePipeEither
     :: Monad m
     => Pipe i o u m a
@@ -309,11 +322,72 @@ compPipe_ p q = FreeT $ runFreeT q >>= \qq -> case qq of
       Free (PYieldF x' y') -> runFreeT $ compPipe_ y' (g x')
     Free (PYieldF x y) -> pure . Free $ PYieldF x (compPipe_ p y)
 
+-- | Useful prefix version of '&|'.
+--
+-- @since 0.2.1.0
+fuseBoth
+    :: Monad m
+    => Pipe a b u m v
+    -> Pipe b c v m r
+    -> Pipe a c u m (v, r)
+fuseBoth p q = p
+            .| (q >>= exhaust)
+  where
+    exhaust x = go
+      where
+        go = awaitEither >>= \case
+          Left  y -> pure (y, x)
+          Right _ -> go
+
+-- | Like 'fuseBoth' and '&|', except does not wait for the upstream pipe
+-- to terminate.  Return 'Nothing' in the first field if the upstream pipe hasn't terminated,
+-- and 'Just' if it has, with the terminating value.
+--
+-- @since 0.2.1.0
+fuseBothMaybe :: Monad m => Pipe a b u m v -> Pipe b c v m r -> Pipe a c u m (Maybe v, r)
+fuseBothMaybe p q = p
+                 .| (q >>= check)
+  where
+    check x = (,x) . either Just (const Nothing) <$> awaitEither
+
+-- | Useful prefix version of '|.'.
+--
+-- @since 0.2.1.0
+fuseUpstream
+    :: Monad m
+    => Pipe a b u m v
+    -> Pipe b c v m r
+    -> Pipe a c u m v
+fuseUpstream p q = fst <$> fuseBoth p q
+
+-- | Like @.|@, but get the result of /both/ pipes on termination, instead
+-- of just the second.  This means that @p &| q@ will only terminate with a result when
+-- /both/ @p@ and @q@ terminate.  (Typically, @p .| q@ would terminate as soon as
+-- @q@ terminates.)
+--
+-- @since 0.2.1.0
+(&|) :: Monad m => Pipe a b u m v -> Pipe b c v m r -> Pipe a c u m (v, r)
+(&|) = fuseBoth
+
+-- | Like @.|@, but keep the result of the /first/ pipe, instead of the
+-- second.  This means that @p |. q@ will only terminate with a result when
+-- /both/ @p@ and @q@ terminate.  (Typically, @p .| q@ would terminate as soon as
+-- @q@ terminates.)
+--
+-- @since 0.2.1.0
+(|.) :: Monad m => Pipe a b u m v -> Pipe b c v m r -> Pipe a c u m v
+(|.) = fuseUpstream
+
+infixr 2 &|
+infixr 2 |.
+
 -- | Loop a pipe into itself.
 --
 -- *  Will feed all output back to the input
 -- *  Will only ask for input upstream if output is stalled.
 -- *  Yields all outputted values downstream, effectively duplicating them.
+--
+-- @since 0.2.1.0
 feedbackPipe
     :: Monad m
     => Pipe x x u m a
@@ -375,9 +449,14 @@ instance Functor (ZipSource m) where
 
 instance Monad m => Applicative (ZipSource m) where
     pure = ZipSource . yield
-    ZipSource (PipeList fs) <*> ZipSource (PipeList xs) = ZipSource . PipeList . fmap Just $
-            uncurry ($)
-        <$> LT.zip (concatListT fs) (concatListT xs)
+    ZipSource p <*> ZipSource q = ZipSource $ zipSource p q
+
+-- | Takes two sources and runs them in parallel, collating their outputs.
+--
+-- @since 0.2.1.0
+zipSource :: Monad m => Pipe () (a -> b) u m () -> Pipe () a v m () -> Pipe () b w m ()
+zipSource (PipeList fs) (PipeList xs) = PipeList . fmap Just $
+    uncurry ($) <$> LT.zip (concatListT fs) (concatListT xs)
 
 concatListT :: Monad m => ListT m (Maybe a) -> ListT m a
 concatListT xs = ListT $ next xs >>= \case

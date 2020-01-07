@@ -21,10 +21,11 @@
 -- state to do its job.  It takes in @i@ and outputs @o@, using an
 -- underlying state @s@.
 --
--- However, such a pipe is morally equivalent to @s -> 'Pipe'
--- i o u 'Identity' (a, s)@.  Giving some starting state, it takes in @i@
--- and outputs @o@, and when it completes, it returns an @a@ and an @s@,
--- the final state after all its processing is done.
+-- However, such a pipe is similar to @s -> 'Pipe'
+-- i o u 'Data.Functor.Identity.Identity' (a, s)@.  Giving some starting
+-- state, it takes in @i@ and outputs @o@, and when it completes, it
+-- returns an @a@ and an @s@, the final state after all its processing is
+-- done.
 --
 -- The /general/ idea is that:
 --
@@ -59,6 +60,7 @@
 -- transformer on a case-by-case basis.  This module provides functions on
 -- such a case-by-case basis as you need them.
 --
+-- @since 0.2.1.0
 module Data.Conduino.Lift (
   -- * State
   -- ** Lazy
@@ -80,14 +82,13 @@ module Data.Conduino.Lift (
   -- ** Strict
   , rwsPS, runRWSPS, evalRWSPS, execRWSPS
   -- * Catch
-  , runCatchP, catchCatchP
+  , catchP, runCatchP
   ) where
 
 import           Control.Monad.Catch.Pure
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Except
 import           Control.Monad.Trans.Free
-import           Control.Monad.Trans.Free.Church
 import           Control.Monad.Trans.RWS           (RWST(..))
 import           Control.Monad.Trans.Reader
 import           Control.Monad.Trans.State
@@ -256,6 +257,25 @@ runExceptP_
     -> Pipe i o u m ()
 runExceptP_ = void . runExceptP
 
+-- | Like 'exceptP', but for 'CatchT'.  See 'exceptP' for usage details and
+-- caveats.  In general, can be useful for chaining with other 'CatchT'
+-- pipes.
+--
+-- Note that a 'throwM' failure will only ever happen when the input pipe
+-- "succesfully" terminates with 'Left'.  It would never happen before the
+-- pipe terminates, since you don't get the @'Either' 'SomeException' a@
+-- until the pipe succesfully terminates.
+catchP
+    :: Monad m
+    => Pipe i o u m (Either SomeException a)
+    -> Pipe i o u (CatchT m) a
+catchP p = hoistPipe lift p >>= \case
+    Left  e -> lift $ throwM e
+    Right x -> pure x
+
+-- | Like 'runExceptP', but for 'CatchT'.  See 'runExceptP' for usage
+-- details.  In general, can be useful for "isolating" a 'CatchT' pipe from
+-- the rest of its chain.
 runCatchP
     :: Monad m
     => Pipe i o u (CatchT m) a
@@ -266,15 +286,6 @@ runCatchP = withRecPipe go
       Left  e        -> Pure $ Left e
       Right (Pure x) -> Pure $ Right x
       Right (Free l) -> Free $ go <$> l
-
-catchCatchP
-    :: Monad m
-    => Pipe i o u (CatchT m) a
-    -> (SomeException -> Pipe i o u (CatchT m) a)
-    -> Pipe i o u (CatchT m) a
-catchCatchP (Pipe p) f = Pipe $ FT $ \return0 handle0 ->
-    catch (runFT p return0 handle0)
-          (\e -> runFT (pipeFree (f e)) return0 handle0)
 
 -- | Turn a "parameterized 'Pipe'" into a 'Pipe' that runs over 'ReaderT',
 -- so you can chain it with other 'ReaderT' pipes.

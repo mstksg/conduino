@@ -93,22 +93,23 @@ makeFree ''PipeF
 --    to produce items.  It will pump out items on its own, for pipes
 --    downstream to receive and process.
 --
--- *  If @o@ is 'Void', the pipe is a /sink/ --- it will never 'yield'
---    anything downstream.  It will consume items from things upstream, and
---    produce a result (@a@) if and when it terminates.
+-- *  If @o@ is 'Data.Void.Void', the pipe is a /sink/ --- it will never
+--    'yield' anything downstream.  It will consume items from things
+--    upstream, and produce a result (@a@) if and when it terminates.
 --
--- *  If @u@ is 'Void', then the pipe's upstream is limitless, and never
---    terminates.  This means that you can use 'Data.Condunio.awaitSurely'
---    instead of 'Data.Conduino.await', to get await a value that is
---    guaranteed to come.  You'll get an @i@ instead of a @'Maybe' i@.
+-- *  If @u@ is 'Data.Void.Void', then the pipe's upstream is limitless,
+--    and never terminates.  This means that you can use
+--    'Data.Conduino.awaitSurely' instead of 'Data.Conduino.await', to get
+--    await a value that is guaranteed to come.  You'll get an @i@ instead
+--    of a @'Maybe' i@.
 --
--- *  If @a@ is 'Void', then the pipe never terminates --- it will keep on
---    consuming and/or producing values forever.  If this is a sink, it
---    means that the sink will never terminate, and so
---    'Data.Condunio.runPipe' will also never terminate.  If it is
+-- *  If @a@ is 'Data.Void.Void', then the pipe never terminates --- it
+--    will keep on consuming and/or producing values forever.  If this is
+--    a sink, it means that the sink will never terminate, and so
+--    'Data.Conduino.runPipe' will also never terminate.  If it is
 --    a source, it means that if you chain something downstream with
---    'Data.Condunio..|', that downstream pipe can use 'awaitSurely' to
---    guarantee something being passed down.
+--    'Data.Conduino..|', that downstream pipe can use
+--    'Data.Conduino.awaitSurely' to guarantee something being passed down.
 --
 -- Applicative and Monadic sequencing of pipes chains by exhaustion.
 --
@@ -129,8 +130,8 @@ makeFree ''PipeF
 -- @
 --
 -- Usually you would use it by chaining together pipes with
--- 'Data.Condunio..|' and then running the result with
--- 'Data.Condunio.runPipe'.
+-- 'Data.Conduino..|' and then running the result with
+-- 'Data.Conduino.runPipe'.
 --
 -- @
 -- 'Data.Conduino.runPipe' $ someSource
@@ -139,11 +140,11 @@ makeFree ''PipeF
 --        .| someSink
 -- @
 --
--- See 'Data.Condunio..|' and 'Data.Condunio.runPipe' for more information
+-- See 'Data.Conduino..|' and 'Data.Conduino.runPipe' for more information
 -- on usage.
 --
 -- For a "prelude" of commonly used 'Pipe's, see
--- "Data.Condunio.Combinators".
+-- "Data.Conduino.Combinators".
 --
 newtype Pipe i o u m a = Pipe { pipeFree :: FT (PipeF i o u) m a }
   deriving
@@ -196,6 +197,10 @@ trimapPipe f g h = Pipe . transFT go . pipeFree
       PYieldF a x -> PYieldF (g a) x
 
 -- | Transform the underlying monad of a pipe.
+--
+-- Note that if you are trying to work with monad transformers, this is
+-- probably not what you want.  See "Data.Conduino.Lift" for tools for
+-- working with underlying monad transformers.
 hoistPipe
     :: (Monad m, Monad n)
     => (forall x. m x -> n x)
@@ -233,7 +238,9 @@ toRecPipe = fromFT . pipeFree
 fromRecPipe :: Monad m => RecPipe i o u m a -> Pipe i o u m a
 fromRecPipe = Pipe . toFT
 
--- | Convenint wrapper over 'toRecPipe' and 'fromRecType'.
+-- | Convenint wrapper over 'toRecPipe' and 'fromRecPipe'.
+--
+-- @since 0.2.1.0
 withRecPipe
     :: (Monad m, Monad n)
     => (RecPipe i o u m a -> RecPipe j p v n b)
@@ -282,7 +289,8 @@ withRecPipe f = fromRecPipe . f . toRecPipe
 -- And @a@ and @b@ will be none the wiser to the fact that @q@ uses
 -- 'StateT' internally.
 --
--- Note to avoid the usage of 'void', 'evalStateP' might be more useful.
+-- Note to avoid the usage of 'void', 'Data.Conduino.Lift.evalStateP' might
+-- be more useful.
 runStateP
     :: Monad m
     => s

@@ -286,6 +286,8 @@ mapM f = awaitForever ((yield =<<) . lift . f)
 
 -- | Execute a monadic function to process every input, passing through the
 -- original value back downstream.
+--
+-- @since 0.2.1.0
 iterM :: Monad m => (i -> m ()) -> Pipe i i u m u
 iterM f = mapM (\x -> x <$ f x)
 
