@@ -31,8 +31,11 @@ module Data.Conduino.Internal (
   , hoistPipe
   , RecPipe
   , toRecPipe, fromRecPipe
+  , withRecPipe
+  , pAwaitF, pYieldF
   ) where
 
+import           Control.Applicative
 import           Control.Monad.Except
 import           Control.Monad.Free.Class
 import           Control.Monad.Free.TH
@@ -151,6 +154,8 @@ newtype Pipe i o u m a = Pipe { pipeFree :: FT (PipeF i o u) m a }
     , MonadWriter w
     , MonadError e
     , MonadRWS r w s
+    , Alternative
+    , MonadPlus
     )
 
 instance MonadFail m => MonadFail (Pipe i o u m) where
@@ -221,3 +226,11 @@ toRecPipe = fromFT . pipeFree
 -- | Convert a 'RecPipe' back into a 'Pipe'.
 fromRecPipe :: Monad m => RecPipe i o u m a -> Pipe i o u m a
 fromRecPipe = Pipe . toFT
+
+-- | Convenint wrapper over 'toRecPipe' and 'fromRecType'.
+withRecPipe
+    :: (Monad m, Monad n)
+    => (RecPipe i o u m a -> RecPipe j p v n b)
+    -> Pipe i o u m a
+    -> Pipe j p v n b
+withRecPipe f = fromRecPipe . f . toRecPipe

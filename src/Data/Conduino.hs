@@ -5,6 +5,7 @@
 {-# LANGUAGE PatternSynonyms            #-}
 {-# LANGUAGE RankNTypes                 #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
+{-# LANGUAGE TupleSections              #-}
 {-# LANGUAGE TypeInType                 #-}
 {-# LANGUAGE ViewPatterns               #-}
 
@@ -23,36 +24,36 @@
 -- A "prelude" of useful pipes can be found in "Data.Conduino.Combinators".
 --
 -- == Why a stream processing library?
--- 
+--
 -- A stream processing library is a way to stream processors in a /composable/ way:
 -- instead of defining your entire stream processing function as a single
 -- recursive loop with some global state, instead think about each "stage" of the process,
 -- and isolate each state to its own segment.  Each component can contain its own
 -- isolated state:
--- 
+--
 -- >>> runPipePure $ sourceList [1..10]
 --       .| scan (+) 0
 --       .| sinkList
 -- [1,3,6,10,15,21,28,36,45,55]
--- 
+--
 -- All of these components have internal "state":
--- 
+--
 -- *   @sourceList@ keeps track of "which" item in the list to yield next
 -- *   @scan@ keeps track of the current running sum
 -- *   @sinkList@ keeps track of all items that have been seen so far, as a list
--- 
+--
 -- They all work together without knowing any other component's internal state, so
 -- you can write your total streaming function without concerning yourself, at
 -- each stage, with the entire part.
--- 
+--
 -- In addition, there are useful functions to "combine" stream processors:
--- 
+--
 -- *   'zipSink' combines sinks in an "and" sort of way: combine two sinks in
 --     parallel and finish when all finish.
 -- *   'altSink' combines sinks in an "or" sort of way: combine two sinks in
 --     parallel and finish when any of them finish
 -- *   'zipSource' combines sources in parallel and collate their outputs.
--- 
+--
 -- Stream processing libraries are also useful for streaming composition of
 -- monadic effects (like IO or State), as well.
 --
@@ -62,6 +63,10 @@ module Data.Conduino (
   , runPipe, runPipePure
   , awaitEither, await, awaitWith, awaitSurely, awaitForever, yield
   , mapInput, mapOutput, mapUpRes, trimapPipe
+  , hoistPipe
+  -- * Incremental running
+  , squeezePipe, squeezePipeEither
+  , feedPipe, feedPipeEither
   -- * Wrappers
   , ZipSource(..)
   , unconsZipSource
@@ -78,6 +83,7 @@ import           Control.Monad
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Free        (FreeT(..), FreeF(..))
 import           Control.Monad.Trans.Free.Church
+import           Data.Bifunctor
 import           Data.Conduino.Internal
 import           Data.Functor
 import           Data.Functor.Identity
@@ -194,6 +200,69 @@ runPipe = iterT go . pipeFree
 -- effects.
 runPipePure :: Pipe () Void Void Identity a -> a
 runPipePure = runIdentity . runPipe
+
+-- | Repeatedly run 'squeezePipe' by giving it items from an input list.
+-- Returns the outputs observed, and 'Left' if the input list was exhausted
+-- with more input expected, or 'Right' if the pipe terminated, with the
+-- leftover inputs and output result.
+feedPipe
+    :: Monad m
+    => [i]
+    -> Pipe i o u m a
+    -> m ([o], Either (i -> Pipe i o u m a) ([i], a))
+feedPipe xs = (fmap . second . first) (. Right)
+            . feedPipeEither xs
+
+-- | Repeatedly run 'squeezePipeEither' by giving it items from an input
+-- list.  Returns the outputs observed, and 'Left' if the input list was
+-- exhausted with more input expected (or a @u@ terminating upstream
+-- value), or 'Right' if the pipe terminated, with the leftover inputs and
+-- output result.
+feedPipeEither
+    :: Monad m
+    => [i]
+    -> Pipe i o u m a
+    -> m ([o], Either (Either u i -> Pipe i o u m a) ([i], a))
+feedPipeEither xs p = do
+    (zs, r) <- squeezePipeEither p
+    case r of
+      Left n -> case xs of
+        []   -> pure (zs, Left n)
+        y:ys -> first (zs ++) <$> feedPipeEither ys (n (Right y))
+      Right z -> pure (zs, Right (xs, z))
+
+-- | "Squeeze" a pipe by extracting all output that can be extracted
+-- before any input is requested.  Returns a 'Left' if the pipe eventually
+-- does request input (as a continuation on the new input), or a 'Right' if
+-- the pipe terminates with a value before ever asking for input.
+squeezePipe
+    :: Monad m
+    => Pipe i o u m a
+    -> m ([o], Either (i -> Pipe i o u m a) a)
+squeezePipe = (fmap . second . first) (. Right)
+            . squeezePipeEither
+
+-- | "Squeeze" a pipe by extracting all output that can be extracted before
+-- any input is requested.  Returns a 'Left' if the pipe eventually does
+-- request input (as a continuation on the new input, or a terminating @u@
+-- value), or a 'Right' if the pipe terminates with a value before ever
+-- asking for input.
+squeezePipeEither
+    :: Monad m
+    => Pipe i o u m a
+    -> m ([o], Either (Either u i -> Pipe i o u m a) a)
+squeezePipeEither p = runFT (pipeFree p)
+    (pure . ([],) . Right)
+    (\pNext -> \case
+        PAwaitF f g -> pure . ([],) . Left $ (unSqueeze =<<) . lift . pNext . either f g
+        PYieldF o x -> first (o:) <$> pNext x
+    )
+  where
+    unSqueeze (os, nxt) = do
+      mapM_ yield os
+      case nxt of
+        Left f  -> f =<< awaitEither
+        Right a -> pure a
 
 -- | The main operator for chaining pipes together.  @pipe1 .| pipe2@ will
 -- connect the output of @pipe1@ to the input of @pipe2@.
@@ -320,27 +389,10 @@ fromListT
     :: Monad m
     => ListT m (Maybe o)
     -> Pipe i o u m ()
-fromListT = fromRecPipe . go
-  where
-    go xs = FreeT $ next xs >>= \case
-      Nil              -> pure . Pure $ ()
-      Cons Nothing  ys -> pure . Free $ PAwaitF (\_ -> pure ()) $ \_ -> go ys
-      Cons (Just y) ys -> pure . Free $ PYieldF y (go ys)
-
----- | A source is essentially equiavlent to 'ListT'.  This converts
----- a 'ListT' to the source it encodes.
-----
----- See 'ZipSource' for a wrapper over 'Pipe' that gives the right 'Functor'
----- and 'Alternative' instances.
---fromListT
---    :: Monad m
---    => ListT m o
---    -> Pipe i o u m ()
---fromListT = fromRecPipe . go
---  where
---    go xs = FreeT $ next xs >>= \case
---      Nil       -> pure . Pure $ ()
---      Cons y ys -> pure . Free $ PYieldF y (go ys)
+fromListT xs = lift (next xs) >>= \case
+      Nil              -> pure ()
+      Cons Nothing  ys -> fromListT ys
+      Cons (Just y) ys -> yield y *> fromListT ys
 
 -- | Given a "generator" of @o@ in @m@, return a /source/ that that
 -- generator encodes.  Is the inverse of 'withSource'.
