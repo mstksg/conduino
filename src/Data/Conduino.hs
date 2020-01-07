@@ -63,10 +63,12 @@ module Data.Conduino (
   , runPipe, runPipePure
   , awaitEither, await, awaitWith, awaitSurely, awaitForever, yield
   , mapInput, mapOutput, mapUpRes, trimapPipe
-  , hoistPipe
   -- * Incremental running
   , squeezePipe, squeezePipeEither
   , feedPipe, feedPipeEither
+  -- * Pipe transformers
+  , hoistPipe
+  , feedbackPipe
   -- * Wrappers
   , ZipSource(..)
   , unconsZipSource
@@ -83,12 +85,15 @@ import           Control.Monad
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Free        (FreeT(..), FreeF(..))
 import           Control.Monad.Trans.Free.Church
+import           Control.Monad.Trans.State
 import           Data.Bifunctor
 import           Data.Conduino.Internal
 import           Data.Functor
 import           Data.Functor.Identity
+import           Data.Sequence                   (Seq(..))
 import           Data.Void
 import           List.Transformer                (ListT(..), Step(..))
+import qualified Data.Sequence                   as Seq
 import qualified List.Transformer                as LT
 
 -- | Await input from upstream.  Will block until upstream 'yield's.
@@ -303,6 +308,29 @@ compPipe_ p q = FreeT $ runFreeT q >>= \qq -> case qq of
                                                     ((`compPipe_` FreeT (pure qq)) . g')
       Free (PYieldF x' y') -> runFreeT $ compPipe_ y' (g x')
     Free (PYieldF x y) -> pure . Free $ PYieldF x (compPipe_ p y)
+
+-- | Loop a pipe into itself.
+--
+-- *  Will feed all output back to the input
+-- *  Will only ask for input upstream if output is stalled.
+-- *  Yields all outputted values downstream, effectively duplicating them.
+feedbackPipe
+    :: Monad m
+    => Pipe x x u m a
+    -> Pipe x x u m a
+feedbackPipe p = fmap fst . runStateP Seq.empty $
+       popper
+    .| hoistPipe lift p
+    .| awaitForever (\x -> lift (modify (:|> x)) *> yield x)
+  where
+    popper = lift get >>= \case
+      Empty -> awaitEither >>= \case
+        Left r  -> pure r
+        Right x -> yield x >> popper
+      x :<| xs -> do
+        lift $ put xs
+        yield x
+        popper
 
 -- | A newtype wrapper over a source (@'Pipe' () o 'Void'@) that gives it an
 -- alternative 'Applicative' and 'Alternative' instance, matching "ListT

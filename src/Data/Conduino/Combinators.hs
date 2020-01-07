@@ -44,6 +44,7 @@ module Data.Conduino.Combinators (
   -- * Pipes
   , map
   , mapM
+  , iterM
   , scan
   , mapAccum
   , take
@@ -282,6 +283,11 @@ map f = awaitForever (yield . f)
 -- | Map a monadic function to process every input, and yield its output.
 mapM :: Monad m => (i -> m o) -> Pipe i o u m u
 mapM f = awaitForever ((yield =<<) . lift . f)
+
+-- | Execute a monadic function to process every input, passing through the
+-- original value back downstream.
+iterM :: Monad m => (i -> m ()) -> Pipe i i u m u
+iterM f = mapM (\x -> x <$ f x)
 
 -- | Map a pure "stateful" function over each incoming item.  Give
 -- a function to update the state and return an output and an initial

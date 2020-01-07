@@ -32,16 +32,20 @@ module Data.Conduino.Internal (
   , RecPipe
   , toRecPipe, fromRecPipe
   , withRecPipe
+  , runStateP
   , pAwaitF, pYieldF
   ) where
 
 import           Control.Applicative
+import           Control.Monad.Catch
 import           Control.Monad.Except
 import           Control.Monad.Free.Class
 import           Control.Monad.Free.TH
 import           Control.Monad.RWS
-import           Control.Monad.Trans.Free        (FreeT(..))
+import           Control.Monad.Trans.Free        (FreeT(..), FreeF(..))
 import           Control.Monad.Trans.Free.Church
+import           Control.Monad.Trans.State
+import           Data.Functor
 
 #if !MIN_VERSION_base(4,13,0)
 import           Control.Monad.Fail
@@ -156,6 +160,8 @@ newtype Pipe i o u m a = Pipe { pipeFree :: FT (PipeF i o u) m a }
     , MonadRWS r w s
     , Alternative
     , MonadPlus
+    , MonadThrow
+    , MonadCatch
     )
 
 instance MonadFail m => MonadFail (Pipe i o u m) where
@@ -234,3 +240,16 @@ withRecPipe
     -> Pipe i o u m a
     -> Pipe j p v n b
 withRecPipe f = fromRecPipe . f . toRecPipe
+
+runStateP
+    :: Monad m
+    => s
+    -> Pipe i o u (StateT s m) a
+    -> Pipe i o u m (a, s)
+runStateP = withRecPipe . go
+  where
+    go s (FreeT p) = FreeT $ runStateT p s <&> \(q, s') ->
+      case q of
+        Pure x -> Pure (x, s')
+        Free l -> Free $ go s' <$> l
+
