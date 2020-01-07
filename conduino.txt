@@ -12,7 +12,7 @@
 --   
 --   See README for more information.
 @package conduino
-@version 0.2.0.0
+@version 0.2.1.0
 
 
 -- | Internal module exposing the internals of <a>Pipe</a>, including its
@@ -41,21 +41,21 @@ module Data.Conduino.Internal
 --   <li>If <tt>i</tt> is <tt>()</tt>, the pipe is a <i>source</i> --- it
 --   doesn't need anything to produce items. It will pump out items on its
 --   own, for pipes downstream to receive and process.</li>
---   <li>If <tt>o</tt> is <tt>Void</tt>, the pipe is a <i>sink</i> --- it
+--   <li>If <tt>o</tt> is <a>Void</a>, the pipe is a <i>sink</i> --- it
 --   will never <a>yield</a> anything downstream. It will consume items
 --   from things upstream, and produce a result (<tt>a</tt>) if and when it
 --   terminates.</li>
---   <li>If <tt>u</tt> is <tt>Void</tt>, then the pipe's upstream is
+--   <li>If <tt>u</tt> is <a>Void</a>, then the pipe's upstream is
 --   limitless, and never terminates. This means that you can use
 --   <a>awaitSurely</a> instead of <a>await</a>, to get await a value that
 --   is guaranteed to come. You'll get an <tt>i</tt> instead of a
 --   <tt><a>Maybe</a> i</tt>.</li>
---   <li>If <tt>a</tt> is <tt>Void</tt>, then the pipe never terminates ---
+--   <li>If <tt>a</tt> is <a>Void</a>, then the pipe never terminates ---
 --   it will keep on consuming and/or producing values forever. If this is
 --   a sink, it means that the sink will never terminate, and so
 --   <a>runPipe</a> will also never terminate. If it is a source, it means
 --   that if you chain something downstream with <a>.|</a>, that downstream
---   pipe can use <tt>awaitSurely</tt> to guarantee something being passed
+--   pipe can use <a>awaitSurely</a> to guarantee something being passed
 --   down.</li>
 --   </ul>
 --   
@@ -91,7 +91,7 @@ module Data.Conduino.Internal
 --   See <a>.|</a> and <a>runPipe</a> for more information on usage.
 --   
 --   For a "prelude" of commonly used <a>Pipe</a>s, see
---   <a>Data.Condunio.Combinators</a>.
+--   <a>Data.Conduino.Combinators</a>.
 newtype Pipe i o u m a
 Pipe :: FT (PipeF i o u) m a -> Pipe i o u m a
 [pipeFree] :: Pipe i o u m a -> FT (PipeF i o u) m a
@@ -143,6 +143,10 @@ mapOutput :: (p -> o) -> Pipe i p u m a -> Pipe i o u m a
 mapUpRes :: (u -> v) -> Pipe i o v m a -> Pipe i o u m a
 
 -- | Transform the underlying monad of a pipe.
+--   
+--   Note that if you are trying to work with monad transformers, this is
+--   probably not what you want. See <a>Data.Conduino.Lift</a> for tools
+--   for working with underlying monad transformers.
 hoistPipe :: (Monad m, Monad n) => (forall x. m x -> n x) -> Pipe i o u m a -> Pipe i o u n a
 
 -- | A version of <a>Pipe</a> that uses explicit, concrete recursion
@@ -160,10 +164,59 @@ toRecPipe :: Monad m => Pipe i o u m a -> RecPipe i o u m a
 -- | Convert a <a>RecPipe</a> back into a <a>Pipe</a>.
 fromRecPipe :: Monad m => RecPipe i o u m a -> Pipe i o u m a
 
--- | Convenint wrapper over <a>toRecPipe</a> and <tt>fromRecType</tt>.
+-- | Convenint wrapper over <a>toRecPipe</a> and <a>fromRecPipe</a>.
 withRecPipe :: (Monad m, Monad n) => (RecPipe i o u m a -> RecPipe j p v n b) -> Pipe i o u m a -> Pipe j p v n b
-pAwaitF :: forall m_a872 i_a4LE o_a4LF u_a4LG. MonadFree (PipeF i_a4LE o_a4LF u_a4LG) m_a872 => m_a872 (Either u_a4LG i_a4LE)
-pYieldF :: forall m_a89p i_a4LE o_a4LF u_a4LG. MonadFree (PipeF i_a4LE o_a4LF u_a4LG) m_a89p => o_a4LF -> m_a89p ()
+
+-- | Turn a <a>Pipe</a> that runs over <a>StateT</a> into a
+--   "state-modifying <a>Pipe</a>", that returns the final state when it
+--   terminates.
+--   
+--   The main usage of this is to "isolate" the state from other pipes in
+--   the same chain. For example, of <tt>p</tt>, <tt>q</tt>, and <tt>r</tt>
+--   are all pipes under <a>StateT</a>, then:
+--   
+--   <pre>
+--      p
+--   .| q
+--   .| r
+--   </pre>
+--   
+--   will all share underlying state, and each can modify the state that
+--   they all three share. We essentially have global state.
+--   
+--   However, if you use <a>runStateP</a>, you can all have them use
+--   different encapsulated states.
+--   
+--   <pre>
+--      void (runStateP s0 p)
+--   .| void (runStateP s1 q)
+--   .| runStateP s2 r
+--   </pre>
+--   
+--   In this case, each of those three chained pipes will use their own
+--   internal states, without sharing.
+--   
+--   This is also useful if you want to chain a pipe over <a>StateT</a>
+--   with pipes that don't use state at all: for example if <tt>a</tt> and
+--   <tt>b</tt> are "non-stateful" pipes (<i>not</i> over <a>StateT</a>),
+--   you can do:
+--   
+--   <pre>
+--      a
+--   .| void (runStateP s1 q)
+--   .| b
+--   </pre>
+--   
+--   And <tt>a</tt> and <tt>b</tt> will be none the wiser to the fact that
+--   <tt>q</tt> uses <a>StateT</a> internally.
+--   
+--   Note to avoid the usage of <a>void</a>, <a>evalStateP</a> might be
+--   more useful.
+runStateP :: Monad m => s -> Pipe i o u (StateT s m) a -> Pipe i o u m (a, s)
+pAwaitF :: forall m_a9x3 i_a6Gp o_a6Gq u_a6Gr. MonadFree (PipeF i_a6Gp o_a6Gq u_a6Gr) m_a9x3 => m_a9x3 (Either u_a6Gr i_a6Gp)
+pYieldF :: forall m_a9zq i_a6Gp o_a6Gq u_a6Gr. MonadFree (PipeF i_a6Gp o_a6Gq u_a6Gr) m_a9zq => o_a6Gq -> m_a9zq ()
+instance Control.Monad.Catch.MonadCatch m => Control.Monad.Catch.MonadCatch (Data.Conduino.Internal.Pipe i o u m)
+instance Control.Monad.Catch.MonadThrow m => Control.Monad.Catch.MonadThrow (Data.Conduino.Internal.Pipe i o u m)
 instance GHC.Base.MonadPlus m => GHC.Base.MonadPlus (Data.Conduino.Internal.Pipe i o u m)
 instance GHC.Base.Alternative m => GHC.Base.Alternative (Data.Conduino.Internal.Pipe i o u m)
 instance (Control.Monad.Reader.Class.MonadReader r m, Control.Monad.Writer.Class.MonadWriter w m, Control.Monad.State.Class.MonadState s m) => Control.Monad.RWS.Class.MonadRWS r w s (Data.Conduino.Internal.Pipe i o u m)
@@ -225,7 +278,7 @@ instance GHC.Base.Functor (Data.Conduino.Internal.PipeF i o u)
 --   sinks in parallel and finish when all finish.</li>
 --   <li><a>altSink</a> combines sinks in an "or" sort of way: combine two
 --   sinks in parallel and finish when any of them finish</li>
---   <li><tt>zipSource</tt> combines sources in parallel and collate their
+--   <li><a>zipSource</a> combines sources in parallel and collate their
 --   outputs.</li>
 --   </ul>
 --   
@@ -255,21 +308,21 @@ module Data.Conduino
 --   <li>If <tt>i</tt> is <tt>()</tt>, the pipe is a <i>source</i> --- it
 --   doesn't need anything to produce items. It will pump out items on its
 --   own, for pipes downstream to receive and process.</li>
---   <li>If <tt>o</tt> is <tt>Void</tt>, the pipe is a <i>sink</i> --- it
+--   <li>If <tt>o</tt> is <a>Void</a>, the pipe is a <i>sink</i> --- it
 --   will never <a>yield</a> anything downstream. It will consume items
 --   from things upstream, and produce a result (<tt>a</tt>) if and when it
 --   terminates.</li>
---   <li>If <tt>u</tt> is <tt>Void</tt>, then the pipe's upstream is
+--   <li>If <tt>u</tt> is <a>Void</a>, then the pipe's upstream is
 --   limitless, and never terminates. This means that you can use
 --   <a>awaitSurely</a> instead of <a>await</a>, to get await a value that
 --   is guaranteed to come. You'll get an <tt>i</tt> instead of a
 --   <tt><a>Maybe</a> i</tt>.</li>
---   <li>If <tt>a</tt> is <tt>Void</tt>, then the pipe never terminates ---
+--   <li>If <tt>a</tt> is <a>Void</a>, then the pipe never terminates ---
 --   it will keep on consuming and/or producing values forever. If this is
 --   a sink, it means that the sink will never terminate, and so
 --   <a>runPipe</a> will also never terminate. If it is a source, it means
 --   that if you chain something downstream with <a>.|</a>, that downstream
---   pipe can use <tt>awaitSurely</tt> to guarantee something being passed
+--   pipe can use <a>awaitSurely</a> to guarantee something being passed
 --   down.</li>
 --   </ul>
 --   
@@ -305,7 +358,7 @@ module Data.Conduino
 --   See <a>.|</a> and <a>runPipe</a> for more information on usage.
 --   
 --   For a "prelude" of commonly used <a>Pipe</a>s, see
---   <a>Data.Condunio.Combinators</a>.
+--   <a>Data.Conduino.Combinators</a>.
 data Pipe i o u m a
 
 -- | The main operator for chaining pipes together. <tt>pipe1 .| pipe2</tt>
@@ -432,24 +485,33 @@ awaitForever :: (i -> Pipe i o u m a) -> Pipe i o u m u
 -- | Send output downstream.
 yield :: o -> Pipe i o u m ()
 
--- | (Contravariantly) map over the expected input type.
-mapInput :: (i -> j) -> Pipe j o u m a -> Pipe i o u m a
+-- | Like <tt>.|</tt>, but get the result of <i>both</i> pipes on
+--   termination, instead of just the second. This means that <tt>p &amp;|
+--   q</tt> will only terminate with a result when <i>both</i> <tt>p</tt>
+--   and <tt>q</tt> terminate. (Typically, <tt>p .| q</tt> would terminate
+--   as soon as <tt>q</tt> terminates.)
+(&|) :: Monad m => Pipe a b u m v -> Pipe b c v m r -> Pipe a c u m (v, r)
+infixr 2 &|
 
--- | Map over the downstream output type.
---   
---   If you want to map over the result type, use <a>fmap</a>.
-mapOutput :: (p -> o) -> Pipe i p u m a -> Pipe i o u m a
+-- | Like <tt>.|</tt>, but keep the result of the <i>first</i> pipe,
+--   instead of the second. This means that <tt>p |. q</tt> will only
+--   terminate with a result when <i>both</i> <tt>p</tt> and <tt>q</tt>
+--   terminate. (Typically, <tt>p .| q</tt> would terminate as soon as
+--   <tt>q</tt> terminates.)
+(|.) :: Monad m => Pipe a b u m v -> Pipe b c v m r -> Pipe a c u m v
+infixr 2 |.
 
--- | (Contravariantly) map over the upstream result type.
-mapUpRes :: (u -> v) -> Pipe i o v m a -> Pipe i o u m a
+-- | Useful prefix version of <a>&amp;|</a>.
+fuseBoth :: Monad m => Pipe a b u m v -> Pipe b c v m r -> Pipe a c u m (v, r)
 
--- | Map over the input type, output type, and upstream result type.
---   
---   If you want to map over the result type, use <a>fmap</a>.
-trimapPipe :: (i -> j) -> (p -> o) -> (u -> v) -> Pipe j p v m a -> Pipe i o u m a
+-- | Useful prefix version of <a>|.</a>.
+fuseUpstream :: Monad m => Pipe a b u m v -> Pipe b c v m r -> Pipe a c u m v
 
--- | Transform the underlying monad of a pipe.
-hoistPipe :: (Monad m, Monad n) => (forall x. m x -> n x) -> Pipe i o u m a -> Pipe i o u n a
+-- | Like <a>fuseBoth</a> and <a>&amp;|</a>, except does not wait for the
+--   upstream pipe to terminate. Return <a>Nothing</a> in the first field
+--   if the upstream pipe hasn't terminated, and <a>Just</a> if it has,
+--   with the terminating value.
+fuseBothMaybe :: Monad m => Pipe a b u m v -> Pipe b c v m r -> Pipe a c u m (Maybe v, r)
 
 -- | <a>Squeeze</a> a pipe by extracting all output that can be extracted
 --   before any input is requested. Returns a <a>Left</a> if the pipe
@@ -477,6 +539,39 @@ feedPipe :: Monad m => [i] -> Pipe i o u m a -> m ([o], Either (i -> Pipe i o u 
 --   terminating upstream value), or <a>Right</a> if the pipe terminated,
 --   with the leftover inputs and output result.
 feedPipeEither :: Monad m => [i] -> Pipe i o u m a -> m ([o], Either (Either u i -> Pipe i o u m a) ([i], a))
+
+-- | (Contravariantly) map over the expected input type.
+mapInput :: (i -> j) -> Pipe j o u m a -> Pipe i o u m a
+
+-- | Map over the downstream output type.
+--   
+--   If you want to map over the result type, use <a>fmap</a>.
+mapOutput :: (p -> o) -> Pipe i p u m a -> Pipe i o u m a
+
+-- | (Contravariantly) map over the upstream result type.
+mapUpRes :: (u -> v) -> Pipe i o v m a -> Pipe i o u m a
+
+-- | Map over the input type, output type, and upstream result type.
+--   
+--   If you want to map over the result type, use <a>fmap</a>.
+trimapPipe :: (i -> j) -> (p -> o) -> (u -> v) -> Pipe j p v m a -> Pipe i o u m a
+
+-- | Transform the underlying monad of a pipe.
+--   
+--   Note that if you are trying to work with monad transformers, this is
+--   probably not what you want. See <a>Data.Conduino.Lift</a> for tools
+--   for working with underlying monad transformers.
+hoistPipe :: (Monad m, Monad n) => (forall x. m x -> n x) -> Pipe i o u m a -> Pipe i o u n a
+
+-- | Loop a pipe into itself.
+--   
+--   <ul>
+--   <li>Will feed all output back to the input</li>
+--   <li>Will only ask for input upstream if output is stalled.</li>
+--   <li>Yields all outputted values downstream, effectively duplicating
+--   them.</li>
+--   </ul>
+feedbackPipe :: Monad m => Pipe x x u m a -> Pipe x x u m a
 
 -- | A newtype wrapper over a source (<tt><a>Pipe</a> () o
 --   <a>Void</a></tt>) that gives it an alternative <a>Applicative</a> and
@@ -515,6 +610,9 @@ ZipSource :: Pipe () a Void m () -> ZipSource m a
 --   As such, you can use <a>unconsZipSource</a> to "peel off" the first
 --   yielded item, if it exists, and return the "rest of the list".
 unconsZipSource :: Monad m => ZipSource m a -> m (Maybe (Maybe a, ZipSource m a))
+
+-- | Takes two sources and runs them in parallel, collating their outputs.
+zipSource :: Monad m => Pipe () (a -> b) u m () -> Pipe () a v m () -> Pipe () b w m ()
 
 -- | A newtype wrapper over a sink (<tt><a>Pipe</a> i <a>Void</a></tt>)
 --   that gives it an alternative <a>Applicative</a> and <a>Alternative</a>
@@ -696,6 +794,10 @@ map :: (i -> o) -> Pipe i o u m u
 -- | Map a monadic function to process every input, and yield its output.
 mapM :: Monad m => (i -> m o) -> Pipe i o u m u
 
+-- | Execute a monadic function to process every input, passing through the
+--   original value back downstream.
+iterM :: Monad m => (i -> m ()) -> Pipe i i u m u
+
 -- | Like <a>foldl</a>, but yields every accumulator value downstream.
 --   
 --   <pre>
@@ -852,4 +954,352 @@ stdout :: MonadIO m => Pipe ByteString o u m ()
 -- | A sink into stderr.
 stderr :: MonadIO m => Pipe ByteString o u m ()
 
+
+-- | Working with underlying monad transformers and <a>Pipe</a>.
+--   
+--   There is no "general abstraction" for dealing with each monad
+--   transformer, but we can translate the semantics that each monad
+--   transformer provides into meaningful <a>Pipe</a> operations.
+--   
+--   For example, a <tt><a>Pipe</a> i o u (<a>State</a> s) a</tt> is a pipe
+--   working over stateful effects --- it can pull information and modify
+--   an underlying state to do its job. It takes in <tt>i</tt> and outputs
+--   <tt>o</tt>, using an underlying state <tt>s</tt>.
+--   
+--   However, such a pipe is similar to <tt>s -&gt; <a>Pipe</a> i o u
+--   <a>Identity</a> (a, s)</tt>. Giving some starting state, it takes in
+--   <tt>i</tt> and outputs <tt>o</tt>, and when it completes, it returns
+--   an <tt>a</tt> and an <tt>s</tt>, the final state after all its
+--   processing is done.
+--   
+--   The <i>general</i> idea is that:
+--   
+--   <ul>
+--   <li>A pipe over a monad transformer <i>shares that monadic context</i>
+--   over <i>every pipe</i> in a composition.</li>
+--   </ul>
+--   
+--   For example, if <tt>p</tt>, <tt>q</tt>, and <tt>r</tt> are all pipes
+--   over <a>StateT</a>, the <tt>p .| q .| r</tt> will all share a common
+--   global state.
+--   
+--   If <tt>p</tt>, <tt>q</tt>, and <tt>r</tt> are all pipes over
+--   <a>ExceptT</a>, then <tt>p .| q .| r</tt> will all short-circult fail
+--   each other: if <tt>q</tt> fails, then they all fail, etc.
+--   
+--   If <tt>p</tt>, <tt>q</tt>, and <tt>r</tt> are all pipes over
+--   <a>WriterT</a> then <tt>p .| q .| r</tt> will all accumulate to a
+--   shared global log.
+--   
+--   If <tt>p</tt>, <tt>q</tt>, and <tt>r</tt> are all pipes over
+--   <a>ReaderT</a> then <tt>p .| q .| r</tt> will use the same identical
+--   environment.
+--   
+--   <ul>
+--   <li>Using the <tt>runX</tt> family of functions (<a>runStateP</a>,
+--   <a>runExceptP</a>, etc.) lets you <i>isolate</i> out the common
+--   context within a composition of pipes.</li>
+--   </ul>
+--   
+--   For example, if <tt>p</tt> is a pipe over <a>StateT</a>, then <tt>a .|
+--   <a>void</a> (<a>runStateP</a> s0 p) .| b</tt>, <tt>a</tt> and
+--   <tt>b</tt> will not be able to use the state of <tt>p</tt>.
+--   
+--   If <tt>p</tt> is a pipe over <a>ExceptT</a>, then in <tt>a .| void
+--   (<a>runExceptP</a> p) .| b</tt>, a failure in <tt>p</tt> will not
+--   cause all the others to fail.
+--   
+--   Both of these representations have different advantages and
+--   disadvantages, that are separate and unique for each individual monad
+--   transformer on a case-by-case basis. This module provides functions on
+--   such a case-by-case basis as you need them.
 module Data.Conduino.Lift
+
+-- | Turn a "state-modifying <a>Pipe</a>" into a <a>Pipe</a> that runs over
+--   <a>StateT</a>, so you can chain it with other <a>StateT</a> pipes.
+--   
+--   Note that this will <i>overwrite</i> whatever state exists with the
+--   <tt>s</tt> that it gets when it terminates. If any other pipe in this
+--   chain modifies or uses state, all modifications will be overwritten
+--   when the <tt>(a, s)</tt>-producing pipe terminates.
+stateP :: Monad m => (s -> Pipe i o u m (a, s)) -> Pipe i o u (StateT s m) a
+
+-- | Turn a <a>Pipe</a> that runs over <a>StateT</a> into a
+--   "state-modifying <a>Pipe</a>", that returns the final state when it
+--   terminates.
+--   
+--   The main usage of this is to "isolate" the state from other pipes in
+--   the same chain. For example, of <tt>p</tt>, <tt>q</tt>, and <tt>r</tt>
+--   are all pipes under <a>StateT</a>, then:
+--   
+--   <pre>
+--      p
+--   .| q
+--   .| r
+--   </pre>
+--   
+--   will all share underlying state, and each can modify the state that
+--   they all three share. We essentially have global state.
+--   
+--   However, if you use <a>runStateP</a>, you can all have them use
+--   different encapsulated states.
+--   
+--   <pre>
+--      void (runStateP s0 p)
+--   .| void (runStateP s1 q)
+--   .| runStateP s2 r
+--   </pre>
+--   
+--   In this case, each of those three chained pipes will use their own
+--   internal states, without sharing.
+--   
+--   This is also useful if you want to chain a pipe over <a>StateT</a>
+--   with pipes that don't use state at all: for example if <tt>a</tt> and
+--   <tt>b</tt> are "non-stateful" pipes (<i>not</i> over <a>StateT</a>),
+--   you can do:
+--   
+--   <pre>
+--      a
+--   .| void (runStateP s1 q)
+--   .| b
+--   </pre>
+--   
+--   And <tt>a</tt> and <tt>b</tt> will be none the wiser to the fact that
+--   <tt>q</tt> uses <a>StateT</a> internally.
+--   
+--   Note to avoid the usage of <a>void</a>, <a>evalStateP</a> might be
+--   more useful.
+runStateP :: Monad m => s -> Pipe i o u (StateT s m) a -> Pipe i o u m (a, s)
+
+-- | Takes a <a>Pipe</a> over <a>StateT</a> and "hides" the state from the
+--   outside world. Give an initial state --- the pipe behaves the same
+--   way, but to the external user it is abstracted away. See
+--   <a>runStateP</a> for more information.
+--   
+--   This can be cleaner than <a>runStateP</a> because if <tt>a</tt> is
+--   <tt>()</tt>, you don't have to sprinkle in <a>void</a> everywhere.
+--   However, it's only really useful if you don't need to get the final
+--   state upon termination.
+evalStateP :: Monad m => s -> Pipe i o u (StateT s m) a -> Pipe i o u m a
+
+-- | Like <a>runStateP</a>, but ignoring the final result. It returns the
+--   final state after the pipe succesfuly terminates.
+execStateP :: Monad m => s -> Pipe i o u (StateT s m) a -> Pipe i o u m s
+
+-- | <a>stateP</a>, but for <a>Control.Monad.Trans.State.Strict</a>.
+statePS :: Monad m => (s -> Pipe i o u m (a, s)) -> Pipe i o u (StateT s m) a
+
+-- | <a>runStateP</a>, but for <a>Control.Monad.Trans.State.Strict</a>.
+runStatePS :: Monad m => s -> Pipe i o u (StateT s m) a -> Pipe i o u m (a, s)
+
+-- | <a>evalStateP</a>, but for <a>Control.Monad.Trans.State.Strict</a>.
+evalStatePS :: Monad m => s -> Pipe i o u (StateT s m) a -> Pipe i o u m a
+
+-- | <a>execStateP</a>, but for <a>Control.Monad.Trans.State.Strict</a>.
+execStatePS :: Monad m => s -> Pipe i o u (StateT s m) a -> Pipe i o u m s
+
+-- | Turn a "failable-result" <a>Pipe</a> into a pipe over <a>ExceptT</a>.
+--   
+--   Note that a <a>throwE</a> failure will only ever happen when the input
+--   pipe "succesfully" terminates with <a>Left</a>. It would never happen
+--   before the pipe terminates, since you don't get the <tt><a>Either</a>
+--   e a</tt> until the pipe succesfully terminates.
+exceptP :: Monad m => Pipe i o u m (Either e a) -> Pipe i o u (ExceptT e m) a
+
+-- | Turn a <a>Pipe</a> that runs over <a>ExceptT</a> into an
+--   "early-terminating <a>Pipe</a>" that "succesfully" returns <a>Left</a>
+--   or <a>Right</a>.
+--   
+--   The main usage of this is to "isolate" the short-circuiting failure of
+--   <a>ExceptT</a> to only happen within one component of a chain. For
+--   example, of <tt>p</tt>, <tt>q</tt>, and <tt>r</tt> are all pipes under
+--   <a>ExceptT</a>, then:
+--   
+--   <pre>
+--      p
+--   .| q
+--   .| r
+--   </pre>
+--   
+--   will short-circuit fail if <i>any</i> of <tt>p</tt>, <tt>q</tt>, or
+--   <tt>r</tt> fail. We have global failure only.
+--   
+--   However, if you use <a>runExceptP</a>, we isolate the short-circuiting
+--   failure to only a single type.
+--   
+--   <pre>
+--      void (runExceptP p)
+--   .| void (runExceptP q)
+--   .| runExceptP r
+--   </pre>
+--   
+--   In this case, if (for example) <tt>q</tt> fails, it won't cause the
+--   whole thing to fail: it will just be the same as if <tt>q</tt>
+--   succesfully terminates normally.
+--   
+--   This is also useful if you want to chain a pipe over <a>ExceptT</a>
+--   with pipes that don't have <a>ExceptT</a> at all: for example if
+--   <tt>a</tt> and <tt>b</tt> are "non-erroring" pipes (<i>not</i> over
+--   <a>ExceptT</a>), you can do:
+--   
+--   <pre>
+--      a
+--   .| void (runExceptP q)
+--   .| b
+--   </pre>
+--   
+--   And <tt>a</tt> and <tt>b</tt> will be none the wiser to the fact that
+--   <tt>q</tt> uses <a>ExceptT</a> internally.
+--   
+--   Note to avoid the usage of <a>void</a>, <a>runExceptP_</a> might be
+--   more useful.
+runExceptP :: Monad m => Pipe i o u (ExceptT e m) a -> Pipe i o u m (Either e a)
+
+-- | A handy version of <a>runExceptP</a> that discards its output, so it
+--   can be easier to chain using <a>.|</a>. It's useful if you are using
+--   <a>runExceptP</a> to "isolate" failures from the rest of a chain.
+runExceptP_ :: Monad m => Pipe i o u (ExceptT e m) a -> Pipe i o u m ()
+
+-- | Turn a "parameterized <a>Pipe</a>" into a <a>Pipe</a> that runs over
+--   <a>ReaderT</a>, so you can chain it with other <a>ReaderT</a> pipes.
+--   
+--   Essentially, instead of directly providing the <tt>r</tt> in an <tt>r
+--   -&gt; <a>Pipe</a> i o u m a</tt>, the <tt>r</tt> instead comes from
+--   the globally shared environment.
+readerP :: Monad m => (r -> Pipe i o u m a) -> Pipe i o u (ReaderT r m) a
+
+-- | Turn a pipe over <a>ReaderT</a> into a directly parameterized pipe.
+--   Instead of getting the parameter from the globally shared
+--   <a>ReaderT</a> environment, give it directly instead.
+--   
+--   It can be useful to "ignore" a globally shared environment and just
+--   give the <tt>r</tt> directly and immediately.
+runReaderP :: Monad m => r -> Pipe i o u (ReaderT r m) a -> Pipe i o u m a
+
+-- | Turn a pipe returning an <tt>(a, w)</tt> tuple upon termination into a
+--   pipe returning <tt>a</tt>, logging the <tt>w</tt> in an underlying
+--   <a>WriterT</a> context.
+--   
+--   This can be useful for composing your pipe with other <a>WriterT</a>
+--   pipes, aggregating all to a common global log.
+--   
+--   However, be aware that this only ever <a>tell</a>s when the pipe
+--   succesfuly terminates. It doesn't do "streaming logging" -- it only
+--   makes one log payload at the point of succesful termination. To do
+--   streaming logging (logging things as you get them), you should
+--   probably just directly use <a>WriterT</a> instead, with <a>repeatM</a>
+--   or <a>iterM</a> or something similar.
+writerP :: (Monad m, Monoid w) => Pipe i o u m (a, w) -> Pipe i o u (WriterT w m) a
+
+-- | Turn a <a>Pipe</a> that runs over <a>WriterT</a> into a <a>Pipe</a>
+--   that returns the final log when it terminates.
+--   
+--   The main usage of this is to "isolate" the log from other pipes in the
+--   same chain. For example, of <tt>p</tt>, <tt>q</tt>, and <tt>r</tt> are
+--   all pipes under <a>WriterT</a>, then:
+--   
+--   <pre>
+--      p
+--   .| q
+--   .| r
+--   </pre>
+--   
+--   will all share underlying log, and all logging from any of them will
+--   accumulate together in an interleaved way. It is essentially a global
+--   log.
+--   
+--   However, if you use <a>runWriterP</a>, you can all have them use
+--   different encapsulated logs.
+--   
+--   <pre>
+--      void (runWriterP p)
+--   .| void (runWriterP q)
+--   .| runWriterP r
+--   </pre>
+--   
+--   In this case, each of those three chained pipes will use their own
+--   internal logs, without sharing.
+--   
+--   This is also useful if you want to chain a pipe over <a>WriterT</a>
+--   with pipes that don't use state at all: for example if <tt>a</tt> and
+--   <tt>b</tt> are "non-logging" pipes (<i>not</i> over <a>WriterT</a>),
+--   you can do:
+--   
+--   <pre>
+--      a
+--   .| void (runWriterP q)
+--   .| b
+--   </pre>
+--   
+--   And <tt>a</tt> and <tt>b</tt> will be none the wiser to the fact that
+--   <tt>q</tt> uses <a>WriterT</a> internally.
+runWriterP :: (Monad m, Monoid w) => Pipe i o u (WriterT w m) a -> Pipe i o u m (a, w)
+
+-- | <a>runWriterP</a>, but only returning the final log after succesful
+--   termination.
+execWriterP :: (Monad m, Monoid w) => Pipe i o u (WriterT w m) a -> Pipe i o u m w
+
+-- | <a>writerP</a>, but for <a>Control.Monad.Trans.Writer.Strict</a>.
+writerPS :: (Monad m, Monoid w) => Pipe i o u m (a, w) -> Pipe i o u (WriterT w m) a
+
+-- | <a>runWriterP</a>, but for <a>Control.Monad.Trans.Writer.Strict</a>.
+runWriterPS :: (Monad m, Monoid w) => Pipe i o u (WriterT w m) a -> Pipe i o u m (a, w)
+
+-- | <a>execWriterP</a>, but for <a>Control.Monad.Trans.Writer.Strict</a>.
+execWriterPS :: (Monad m, Monoid w) => Pipe i o u (WriterT w m) a -> Pipe i o u m w
+
+-- | Turn a parameterized, state-transforming, log-producing <a>Pipe</a>
+--   into a <a>Pipe</a> over <a>RWST</a>, which can be useful for chaining
+--   it with other <a>RWST</a> pipes.
+--   
+--   See <a>stateP</a> and <a>writerP</a> for more details on caveats,
+--   including:
+--   
+--   <ul>
+--   <li>Logging only happens when the <tt>(a,s,w)</tt>-returning pipe
+--   terminates. There is no "streaming logging" --- the resulting
+--   <tt>w</tt> is logged all at once.</li>
+--   <li>When the <tt>(a,s,w)</tt>-returning pipe terminates, whatever
+--   state in the <a>RWST</a> is overwritten with the <tt>s</tt> returned.
+--   If other pipes in the chain modify the <tt>s</tt>, their modifications
+--   will be overwritten.</li>
+--   </ul>
+rwsP :: (Monad m, Monoid w) => (r -> s -> Pipe i o u m (a, s, w)) -> Pipe i o u (RWST r w s m) a
+
+-- | Turn a <a>Pipe</a> that runs over <a>RWST</a> into a state-modifying,
+--   environment-using, log-accumulating <a>Pipe</a>. See <a>runStateP</a>,
+--   <a>runWriterP</a>, and <a>runReaderP</a> for the uses and semantics.
+runRWSP :: (Monad m, Monoid w) => r -> s -> Pipe i o u (RWST r w s m) a -> Pipe i o u m (a, s, w)
+
+-- | <a>runRWSP</a>, but ignoring the final state.
+evalRWSP :: (Monad m, Monoid w) => r -> s -> Pipe i o u (RWST r w s m) a -> Pipe i o u m (a, w)
+
+-- | <a>runRWSP</a>, but ignoring the result value.
+execRWSP :: (Monad m, Monoid w) => r -> s -> Pipe i o u (RWST r w s m) a -> Pipe i o u m (s, w)
+
+-- | <a>rwsP</a>, but for <a>Control.Monad.Trans.RWS.Strict</a>.
+rwsPS :: (Monad m, Monoid w) => (r -> s -> Pipe i o u m (a, s, w)) -> Pipe i o u (RWST r w s m) a
+
+-- | <a>runRWSPS</a>, but for <a>Control.Monad.Trans.RWS.Strict</a>.
+runRWSPS :: (Monad m, Monoid w) => r -> s -> Pipe i o u (RWST r w s m) a -> Pipe i o u m (a, s, w)
+
+-- | <a>evalRWSPS</a>, but for <a>Control.Monad.Trans.RWS.Strict</a>.
+evalRWSPS :: (Monad m, Monoid w) => r -> s -> Pipe i o u (RWST r w s m) a -> Pipe i o u m (a, w)
+
+-- | <a>execRWSPS</a>, but for <a>Control.Monad.Trans.RWS.Strict</a>.
+execRWSPS :: (Monad m, Monoid w) => r -> s -> Pipe i o u (RWST r w s m) a -> Pipe i o u m (s, w)
+
+-- | Like <a>exceptP</a>, but for <a>CatchT</a>. See <a>exceptP</a> for
+--   usage details and caveats. In general, can be useful for chaining with
+--   other <a>CatchT</a> pipes.
+--   
+--   Note that a <a>throwM</a> failure will only ever happen when the input
+--   pipe "succesfully" terminates with <a>Left</a>. It would never happen
+--   before the pipe terminates, since you don't get the <tt><a>Either</a>
+--   <a>SomeException</a> a</tt> until the pipe succesfully terminates.
+catchP :: Monad m => Pipe i o u m (Either SomeException a) -> Pipe i o u (CatchT m) a
+
+-- | Like <a>runExceptP</a>, but for <a>CatchT</a>. See <a>runExceptP</a>
+--   for usage details. In general, can be useful for "isolating" a
+--   <a>CatchT</a> pipe from the rest of its chain.
+runCatchP :: Monad m => Pipe i o u (CatchT m) a -> Pipe i o u m (Either SomeException a)
