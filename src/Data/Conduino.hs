@@ -72,7 +72,7 @@ module Data.Conduino (
   -- * Pipe transformers
   , mapInput, mapOutput, mapUpRes, trimapPipe
   , hoistPipe
-  , feedbackPipe
+  , feedbackPipe, feedbackPipeEither
   -- * Wrappers
   , ZipSource(..)
   , unconsZipSource
@@ -219,7 +219,7 @@ runPipePure = runIdentity . runPipe
 -- @since 0.2.1.0
 feedPipe
     :: Monad m
-    => [i]
+    => [i]                      -- ^ input to feed in
     -> Pipe i o u m a
     -> m ([o], Either (i -> Pipe i o u m a) ([i], a))
 feedPipe xs = (fmap . second . first) (. Right)
@@ -234,7 +234,7 @@ feedPipe xs = (fmap . second . first) (. Right)
 -- @since 0.2.1.0
 feedPipeEither
     :: Monad m
-    => [i]
+    => [i]                      -- ^ input to feed in
     -> Pipe i o u m a
     -> m ([o], Either (Either u i -> Pipe i o u m a) ([i], a))
 feedPipeEither xs p = do
@@ -392,7 +392,22 @@ feedbackPipe
     :: Monad m
     => Pipe x x u m a
     -> Pipe x x u m a
-feedbackPipe p = fmap fst . runStateP Seq.empty $
+feedbackPipe = feedbackPipeEither . mapInput (either id id)
+
+-- | A version of 'feedbackPipe' that distinguishes upstream input from
+-- downstream output fed back.  Gets 'Left' from upstream, and 'Right' from
+-- its own output.
+--
+-- *  Will feed all output back to the input
+-- *  Will only ask for input upstream if output is stalled.
+-- *  Yields all outputted values downstream, effectively duplicating them.
+--
+-- @since 0.2.2.0
+feedbackPipeEither
+    :: Monad m
+    => Pipe (Either i o) o u m a
+    -> Pipe i o u m a
+feedbackPipeEither p = fmap fst . runStateP Seq.empty $
        popper
     .| hoistPipe lift p
     .| awaitForever (\x -> lift (modify (:|> x)) *> yield x)
@@ -400,10 +415,10 @@ feedbackPipe p = fmap fst . runStateP Seq.empty $
     popper = lift get >>= \case
       Empty -> awaitEither >>= \case
         Left r  -> pure r
-        Right x -> yield x >> popper
+        Right x -> yield (Left x) >> popper
       x :<| xs -> do
         lift $ put xs
-        yield x
+        yield (Right x)
         popper
 
 -- | A newtype wrapper over a source (@'Pipe' () o 'Void'@) that gives it an

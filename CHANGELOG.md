@@ -1,10 +1,20 @@
 Changelog
 =========
 
+Version 0.2.2.0
+---------------
+
+*January 7, 2020*
+
+<https://github.com/mstksg/conduino/releases/tag/v0.2.2.0>
+
+*   Added `feedbackEither` for more flexibility on top of `feedback`
+*   Some documentation cleanup
+
 Version 0.2.1.0
 ---------------
 
-*October 30, 2019*
+*January 7, 2020*
 
 <https://github.com/mstksg/conduino/releases/tag/v0.2.1.0>
 
