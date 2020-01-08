@@ -12,7 +12,7 @@
 --   
 --   See README for more information.
 @package conduino
-@version 0.2.1.0
+@version 0.2.2.0
 
 
 -- | Internal module exposing the internals of <a>Pipe</a>, including its
@@ -572,6 +572,18 @@ hoistPipe :: (Monad m, Monad n) => (forall x. m x -> n x) -> Pipe i o u m a -> P
 --   them.</li>
 --   </ul>
 feedbackPipe :: Monad m => Pipe x x u m a -> Pipe x x u m a
+
+-- | A version of <a>feedbackPipe</a> that distinguishes upstream input
+--   from downstream output fed back. Gets <a>Left</a> from upstream, and
+--   <a>Right</a> from its own output.
+--   
+--   <ul>
+--   <li>Will feed all output back to the input</li>
+--   <li>Will only ask for input upstream if output is stalled.</li>
+--   <li>Yields all outputted values downstream, effectively duplicating
+--   them.</li>
+--   </ul>
+feedbackPipeEither :: Monad m => Pipe (Either i o) o u m a -> Pipe i o u m a
 
 -- | A newtype wrapper over a source (<tt><a>Pipe</a> () o
 --   <a>Void</a></tt>) that gives it an alternative <a>Applicative</a> and
