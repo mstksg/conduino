@@ -1,6 +1,17 @@
 Changelog
 =========
 
+Version 0.2.3.0
+---------------
+
+*March 25, 2022*
+
+<https://github.com/mstksg/conduino/releases/tag/v0.2.3.0>
+
+*   Add `sourceHandleLinesText` for `Text` output
+*   `sourceHandleLines` now continues through blank lines, but `stdinLines`
+    retains the same behavior.
+
 Version 0.2.2.0
 ---------------
 

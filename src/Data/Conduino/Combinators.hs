@@ -38,6 +38,7 @@ module Data.Conduino.Combinators (
   , repeatEitherM
   , replicateM
   , sourceHandleLines
+  , sourceHandleLinesText
   , stdinLines
   , sourceHandle
   , stdin
@@ -87,6 +88,8 @@ import           System.IO.Error
 import qualified Data.ByteString               as BS
 import qualified Data.ByteString.Lazy.Internal as BSL
 import qualified Data.Sequence                 as Seq
+import qualified Data.Text                     as T
+import qualified Data.Text.IO                  as T
 import qualified System.IO                     as S
 
 -- | A version of 'unfoldMaybe' that can choose the "result" value by
@@ -212,6 +215,7 @@ replicateM n x = replicateM_ n $ lift x >>= yield
 -- end-of-file is reached, or an empty line is seen.
 stdinLines :: MonadIO m => Pipe i String u m ()
 stdinLines = sourceHandleLines S.stdin
+          .| takeWhile (not . null)
 
 -- | Source from stdin, yielding bytestrings as they are drawn.  If you
 -- want to retrieve each line as a string, see 'stdinLines'.
@@ -221,7 +225,9 @@ stdin = sourceHandle S.stdin
 -- | Source from a given I/O handle, yielding each line drawn as a string.
 -- To draw raw bytes, use 'sourceHandle'.
 --
--- This stop as soon as end-of-file is reached, or an empty line is seen.
+-- This stop as soon as end-of-file is reached.
+--
+-- Sinve v0.2.3.0, this now continues through empty lines.
 sourceHandleLines
     :: MonadIO m
     => S.Handle
@@ -232,7 +238,24 @@ sourceHandleLines h = repeatMaybeM $ do
       then pure Nothing
       else liftIO . catchJust
                 (guard . isEOFError)
-                (mfilter (not . null) . Just <$> S.hGetLine h)
+                (Just <$> S.hGetLine h)
+                $ \_ -> pure Nothing
+
+-- | Source from a given I/O handle, yielding each line drawn as a string.
+-- To draw raw bytes, use 'sourceHandle'.
+--
+-- This stop as soon as end-of-file is reached, or an empty line is seen.
+sourceHandleLinesText
+    :: MonadIO m
+    => S.Handle
+    -> Pipe i T.Text u m ()
+sourceHandleLinesText h = repeatMaybeM $ do
+    d <- liftIO $ S.hIsEOF h
+    if d
+      then pure Nothing
+      else liftIO . catchJust
+                (guard . isEOFError)
+                (Just <$> T.hGetLine h)
                 $ \_ -> pure Nothing
 
 -- | Source from a given I/O handle, yielding bytestrings as they are
