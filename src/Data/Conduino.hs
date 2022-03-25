@@ -71,6 +71,7 @@ module Data.Conduino (
   , feedPipe, feedPipeEither
   -- * Pipe transformers
   , mapInput, mapOutput, mapUpRes, trimapPipe
+  , passthrough
   , hoistPipe
   , feedbackPipe, feedbackPipeEither
   -- * Wrappers
@@ -380,6 +381,28 @@ fuseUpstream p q = fst <$> fuseBoth p q
 
 infixr 2 &|
 infixr 2 |.
+
+-- | Passthrough and pair each output with the /last/ input that triggered
+-- it.  'Nothing' will occur initially if the pipe outputs anything without
+-- consuming any values, but after the first 'Just', should only output
+-- Justs forever.
+--
+-- @since 0.2.3.0
+passthrough
+    :: Monad m
+    => Pipe i o u m a
+    -> Pipe i (Maybe i, o) u m a
+passthrough p = fmap fst . runStateP Nothing $
+       awaitForever passOn
+    .| hoistPipe lift p
+    .| awaitForever tagIn
+  where
+    passOn i = do
+      lift $ put (Just i)
+      yield i
+    tagIn i = do
+      yield . (,i) =<< lift get
+    
 
 -- | Loop a pipe into itself.
 --

@@ -10,7 +10,8 @@ Version 0.2.3.0
 
 *   Add `sourceHandleLinesText` for `Text` output
 *   `sourceHandleLines` now continues through blank lines, but `stdinLines`
-    retains the same behavior.
+    retains the same behavior
+*   `passthrough` pipe manipulation
 
 Version 0.2.2.0
 ---------------
