@@ -176,10 +176,12 @@ instance MonadFail m => MonadFail (Pipe i o u m) where
 -- (expected input type) or a @u@ if the upstream pipe terminates.
 awaitEither :: Pipe i o u m (Either u i)
 awaitEither = pAwaitF
+{-# INLINE awaitEither #-}
 
 -- | Send output downstream.
 yield :: o -> Pipe i o u m ()
 yield = pYieldF
+{-# INLINE yield #-}
 
 -- | Map over the input type, output type, and upstream result type.
 --
@@ -195,6 +197,7 @@ trimapPipe f g h = Pipe . transFT go . pipeFree
     go = \case
       PAwaitF a b -> PAwaitF (a . h) (b . f)
       PYieldF a x -> PYieldF (g a) x
+{-# INLINE trimapPipe #-}
 
 -- | Transform the underlying monad of a pipe.
 --
@@ -207,20 +210,24 @@ hoistPipe
     -> Pipe i o u m a
     -> Pipe i o u n a
 hoistPipe f = Pipe . hoistFT f . pipeFree
+{-# INLINE hoistPipe #-}
 
 -- | (Contravariantly) map over the expected input type.
 mapInput :: (i -> j) -> Pipe j o u m a -> Pipe i o u m a
 mapInput f = trimapPipe f id id
+{-# INLINE mapInput #-}
 
 -- | Map over the downstream output type.
 --
 -- If you want to map over the result type, use 'fmap'.
 mapOutput :: (p -> o) -> Pipe i p u m a -> Pipe i o u m a
 mapOutput f = trimapPipe id f id
+{-# INLINE mapOutput #-}
 
 -- | (Contravariantly) map over the upstream result type.
 mapUpRes :: (u -> v) -> Pipe i o v m a -> Pipe i o u m a
 mapUpRes = trimapPipe id id
+{-# INLINE mapUpRes #-}
 
 -- | A version of 'Pipe' that uses explicit, concrete recursion instead of
 -- church-encoding like 'Pipe'.  Some functions --- especially ones that
@@ -233,10 +240,12 @@ type RecPipe i o u = FreeT (PipeF i o u)
 -- pipe combining functions in terms of 'RecPipe' than 'Pipe'.
 toRecPipe :: Monad m => Pipe i o u m a -> RecPipe i o u m a
 toRecPipe = fromFT . pipeFree
+{-# INLINE toRecPipe #-}
 
 -- | Convert a 'RecPipe' back into a 'Pipe'.
 fromRecPipe :: Monad m => RecPipe i o u m a -> Pipe i o u m a
 fromRecPipe = Pipe . toFT
+{-# INLINE fromRecPipe #-}
 
 -- | Convenint wrapper over 'toRecPipe' and 'fromRecPipe'.
 --
@@ -247,6 +256,7 @@ withRecPipe
     -> Pipe i o u m a
     -> Pipe j p v n b
 withRecPipe f = fromRecPipe . f . toRecPipe
+{-# INLINE withRecPipe #-}
 
 -- | Turn a 'Pipe' that runs over 'StateT' into a "state-modifying 'Pipe'",
 -- that returns the final state when it terminates.
@@ -304,4 +314,5 @@ runStateP = withRecPipe . go
       case q of
         Pure x -> Pure (x, s')
         Free l -> Free $ go s' <$> l
+{-# INLINE runStateP #-}
 

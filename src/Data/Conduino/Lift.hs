@@ -1,5 +1,6 @@
-{-# LANGUAGE LambdaCase   #-}
-{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE LambdaCase    #-}
+{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE ViewPatterns  #-}
 
 -- |
 -- Module      : Data.Conduino.Lift
@@ -85,10 +86,12 @@ module Data.Conduino.Lift (
   , catchP, runCatchP
   ) where
 
+import           Control.Monad
 import           Control.Monad.Catch.Pure
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Except
 import           Control.Monad.Trans.Free
+import           Control.Monad.Trans.Free.Church
 import           Control.Monad.Trans.RWS           (RWST(..))
 import           Control.Monad.Trans.Reader
 import           Control.Monad.Trans.State
@@ -129,6 +132,7 @@ execStateP
     -> Pipe i o u (StateT s m) a
     -> Pipe i o u m s
 execStateP s = fmap snd . runStateP s
+{-# INLINE execStateP #-}
 
 -- | Takes a 'Pipe' over 'StateT' and "hides" the state from the outside
 -- world.  Give an initial state --- the pipe behaves the same way, but to
@@ -146,6 +150,7 @@ evalStateP
     -> Pipe i o u (StateT s m) a
     -> Pipe i o u m a
 evalStateP s = fmap fst . runStateP s
+{-# INLINE evalStateP #-}
 
 -- | 'stateP', but for "Control.Monad.Trans.State.Strict".
 --
@@ -158,6 +163,7 @@ statePS f = do
     s       <- lift SS.get
     (x, s') <- hoistPipe lift (f s)
     x <$ lift (SS.put s')
+{-# INLINE statePS #-}
 
 -- | 'runStateP', but for "Control.Monad.Trans.State.Strict".
 --
@@ -173,6 +179,7 @@ runStatePS = withRecPipe . go
       case q of
         Pure x -> Pure (x, s')
         Free l -> Free $ go s' <$> l
+{-# INLINE runStatePS #-}
 
 -- | 'execStateP', but for "Control.Monad.Trans.State.Strict".
 --
@@ -183,6 +190,7 @@ execStatePS
     -> Pipe i o u (SS.StateT s m) a
     -> Pipe i o u m s
 execStatePS s = fmap snd . runStatePS s
+{-# INLINE execStatePS #-}
 
 -- | 'evalStateP', but for "Control.Monad.Trans.State.Strict".
 --
@@ -193,6 +201,7 @@ evalStatePS
     -> Pipe i o u (SS.StateT s m) a
     -> Pipe i o u m a
 evalStatePS s = fmap fst . runStatePS s
+{-# INLINE evalStatePS #-}
 
 -- | Turn a "failable-result" 'Pipe' into a pipe over 'ExceptT'.
 --
@@ -209,6 +218,7 @@ exceptP
 exceptP p = hoistPipe lift p >>= \case
     Left  e -> lift $ throwE e
     Right x -> pure x
+{-# INLINE exceptP #-}
 
 -- | Turn a 'Pipe' that runs over 'ExceptT' into an "early-terminating
 -- 'Pipe'" that "succesfully" returns 'Left' or 'Right'.
@@ -259,12 +269,11 @@ runExceptP
     :: Monad m
     => Pipe i o u (ExceptT e m) a
     -> Pipe i o u m (Either e a)
-runExceptP = withRecPipe go
-  where
-    go (FreeT p) = FreeT $ runExceptT p <&> \case
-      Left  e        -> Pure $ Left e
-      Right (Pure x) -> Pure $ Right x
-      Right (Free l) -> Free $ go <$> l
+runExceptP (Pipe (FT f)) = Pipe $ FT $ \pr bd -> either (pr . Left) pure =<< runExceptT (
+      f (lift . pr . Right)
+        (\c -> lift . bd (either (pr . Left) pure <=< runExceptT . c))
+    )
+{-# INLINE runExceptP #-}
 
 -- | A handy version of 'runExceptP' that discards its output, so it can be
 -- easier to chain using '.|'.  It's useful if you are using 'runExceptP'
@@ -276,6 +285,7 @@ runExceptP_
     => Pipe i o u (ExceptT e m) a
     -> Pipe i o u m ()
 runExceptP_ = void . runExceptP
+{-# INLINE runExceptP_ #-}
 
 -- | Like 'exceptP', but for 'CatchT'.  See 'exceptP' for usage details and
 -- caveats.  In general, can be useful for chaining with other 'CatchT'
@@ -294,6 +304,7 @@ catchP
 catchP p = hoistPipe lift p >>= \case
     Left  e -> lift $ throwM e
     Right x -> pure x
+{-# INLINE catchP #-}
 
 -- | Like 'runExceptP', but for 'CatchT'.  See 'runExceptP' for usage
 -- details.  In general, can be useful for "isolating" a 'CatchT' pipe from
@@ -304,12 +315,11 @@ runCatchP
     :: Monad m
     => Pipe i o u (CatchT m) a
     -> Pipe i o u m (Either SomeException a)
-runCatchP = withRecPipe go
-  where
-    go (FreeT p) = FreeT $ runCatchT p <&> \case
-      Left  e        -> Pure $ Left e
-      Right (Pure x) -> Pure $ Right x
-      Right (Free l) -> Free $ go <$> l
+runCatchP (Pipe (FT f)) = Pipe $ FT $ \pr bd -> either (pr . Left) pure =<< runCatchT (
+      f (lift . pr . Right)
+        (\c -> lift . bd (either (pr . Left) pure <=< runCatchT . c))
+    )
+{-# INLINE runCatchP #-}
 
 -- | Turn a "parameterized 'Pipe'" into a 'Pipe' that runs over 'ReaderT',
 -- so you can chain it with other 'ReaderT' pipes.
@@ -414,6 +424,7 @@ runWriterP = withRecPipe (go mempty)
       case r of
         Pure x -> Pure (x, w')
         Free l -> Free $ go w' <$> l
+{-# INLINE runWriterP #-}
 
 -- | 'runWriterP', but only returning the final log after succesful
 -- termination.
@@ -424,6 +435,7 @@ execWriterP
     => Pipe i o u (WriterT w m) a
     -> Pipe i o u m w
 execWriterP = fmap snd . runWriterP
+{-# INLINE execWriterP #-}
 
 -- | 'writerP', but for "Control.Monad.Trans.Writer.Strict".
 --
@@ -449,6 +461,7 @@ runWriterPS = withRecPipe (go mempty)
       case r of
         Pure x -> Pure (x, w')
         Free l -> Free $ go w' <$> l
+{-# INLINE runWriterPS #-}
 
 -- | 'execWriterP', but for "Control.Monad.Trans.Writer.Strict".
 --
@@ -458,6 +471,7 @@ execWriterPS
     => Pipe i o u (WriterT w m) a
     -> Pipe i o u m w
 execWriterPS = fmap snd . runWriterP
+{-# INLINE execWriterPS #-}
 
 -- | Turn a parameterized, state-transforming, log-producing 'Pipe' into
 -- a 'Pipe' over 'RWST', which can be useful for chaining it with other
@@ -501,6 +515,7 @@ runRWSP r = withRecPipe . go mempty
       case q of
         Pure x -> Pure (x, s', w')
         Free l -> Free $ go w' s' <$> l
+{-# INLINE runRWSP #-}
 
 -- | 'runRWSP', but ignoring the final state.
 --
@@ -512,6 +527,7 @@ evalRWSP
     -> Pipe i o u (RWST r w s m) a
     -> Pipe i o u m (a, w)
 evalRWSP r s = fmap (\(x,_,w) -> (x,w)) . runRWSP r s
+{-# INLINE evalRWSP #-}
 
 -- | 'runRWSP', but ignoring the result value.
 --
@@ -523,6 +539,7 @@ execRWSP
     -> Pipe i o u (RWST r w s m) a
     -> Pipe i o u m (s, w)
 execRWSP r s = fmap (\(_,s',w) -> (s',w)) . runRWSP r s
+{-# INLINE execRWSP #-}
 
 -- | 'rwsP', but for "Control.Monad.Trans.RWS.Strict".
 --
@@ -553,6 +570,7 @@ runRWSPS r = withRecPipe . go mempty
       case q of
         Pure x -> Pure (x, s', w')
         Free l -> Free $ go w' s' <$> l
+{-# INLINE runRWSPS #-}
 
 -- | 'evalRWSPS', but for "Control.Monad.Trans.RWS.Strict".
 --
@@ -564,6 +582,7 @@ evalRWSPS
     -> Pipe i o u (RWSS.RWST r w s m) a
     -> Pipe i o u m (a, w)
 evalRWSPS r s = fmap (\(x,_,w) -> (x,w)) . runRWSPS r s
+{-# INLINE evalRWSPS #-}
 
 -- | 'execRWSPS', but for "Control.Monad.Trans.RWS.Strict".
 --
@@ -575,3 +594,4 @@ execRWSPS
     -> Pipe i o u (RWSS.RWST r w s m) a
     -> Pipe i o u m (s, w)
 execRWSPS r s = fmap (\(_,s',w) -> (s',w)) . runRWSPS r s
+{-# INLINE execRWSPS #-}

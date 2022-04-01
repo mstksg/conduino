@@ -12,6 +12,8 @@ Version 0.2.3.0
 *   `sourceHandleLines` now continues through blank lines, but `stdinLines`
     retains the same behavior
 *   `passthrough` pipe manipulation
+*   More efficient `runExceptP`, `runCatchP`
+*   More explicit inlining
 
 Version 0.2.2.0
 ---------------

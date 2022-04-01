@@ -112,6 +112,7 @@ import qualified List.Transformer                as LT
 -- Will always return 'Just' if @u@ is 'Void'.
 await :: Pipe i o u m (Maybe i)
 await = either (const Nothing) Just <$> awaitEither
+{-# INLINE await #-}
 
 -- | 'await', but directly chaining a continuation if the 'await' was
 -- succesful.
@@ -124,6 +125,7 @@ awaitWith :: (i -> Pipe i o u m u) -> Pipe i o u m u
 awaitWith f = awaitEither >>= \case
     Left  r -> pure r
     Right x -> f x
+{-# INLINE awaitWith #-}
 
 -- | Await input from upstream where the upstream pipe is guaranteed to
 -- never terminate.
@@ -137,6 +139,7 @@ awaitWith f = awaitEither >>= \case
 -- of 'awaitSurely'.
 awaitSurely :: Pipe i o Void m i
 awaitSurely = either absurd id <$> awaitEither
+{-# INLINE awaitSurely #-}
 
 -- | A useful utility function over repeated 'await's.  Will repeatedly
 -- 'await' and then continue with the given pipe whenever the upstream pipe
@@ -149,6 +152,7 @@ awaitSurely = either absurd id <$> awaitEither
 -- @
 awaitForever :: (i -> Pipe i o u m a) -> Pipe i o u m u
 awaitForever = awaitForeverWith pure
+{-# INLINE awaitForever #-}
 
 -- | 'awaitForever', but with a way to handle the result of the
 -- upstream pipe, which will be called when the upstream pipe stops
@@ -162,6 +166,7 @@ awaitForeverWith f g = go
     go = awaitEither >>= \case
       Left x  -> mapInput (const ()) $ f x
       Right x -> g x *> go
+{-# INLINE awaitForeverWith #-}
 
 -- | Run a pipe that is both a source and a sink (an "effect") into the
 -- effect that it represents.
@@ -211,6 +216,7 @@ runPipe = iterT go . pipeFree
 -- effects.
 runPipePure :: Pipe () Void Void Identity a -> a
 runPipePure = runIdentity . runPipe
+{-# INLINE runPipePure #-}
 
 -- | Repeatedly run 'squeezePipe' by giving it items from an input list.
 -- Returns the outputs observed, and 'Left' if the input list was exhausted
@@ -225,6 +231,7 @@ feedPipe
     -> m ([o], Either (i -> Pipe i o u m a) ([i], a))
 feedPipe xs = (fmap . second . first) (. Right)
             . feedPipeEither xs
+{-# INLINE feedPipe #-}
 
 -- | Repeatedly run 'squeezePipeEither' by giving it items from an input
 -- list.  Returns the outputs observed, and 'Left' if the input list was
@@ -245,6 +252,7 @@ feedPipeEither xs p = do
         []   -> pure (zs, Left n)
         y:ys -> first (zs ++) <$> feedPipeEither ys (n (Right y))
       Right z -> pure (zs, Right (xs, z))
+{-# INLINE feedPipeEither #-}
 
 -- | "Squeeze" a pipe by extracting all output that can be extracted
 -- before any input is requested.  Returns a 'Left' if the pipe eventually
@@ -258,6 +266,7 @@ squeezePipe
     -> m ([o], Either (i -> Pipe i o u m a) a)
 squeezePipe = (fmap . second . first) (. Right)
             . squeezePipeEither
+{-# INLINE squeezePipe #-}
 
 -- | "Squeeze" a pipe by extracting all output that can be extracted before
 -- any input is requested.  Returns a 'Left' if the pipe eventually does
@@ -282,6 +291,7 @@ squeezePipeEither p = runFT (pipeFree p)
       case nxt of
         Left f  -> f =<< awaitEither
         Right a -> pure a
+{-# INLINE squeezePipeEither #-}
 
 -- | The main operator for chaining pipes together.  @pipe1 .| pipe2@ will
 -- connect the output of @pipe1@ to the input of @pipe2@.
@@ -308,6 +318,7 @@ squeezePipeEither p = runFT (pipeFree p)
     -> Pipe a c u m r
 Pipe p .| Pipe q = Pipe $ toFT $ compPipe_ (fromFT p) (fromFT q)
 infixr 2 .|
+{-# INLINE (.|) #-}
 
 compPipe_
     :: forall a b c u v m r. (Monad m)
@@ -339,6 +350,7 @@ fuseBoth p q = p
         go = awaitEither >>= \case
           Left  y -> pure (y, x)
           Right _ -> go
+{-# INLINE fuseBoth #-}
 
 -- | Like 'fuseBoth' and '&|', except does not wait for the upstream pipe
 -- to terminate.  Return 'Nothing' in the first field if the upstream pipe hasn't terminated,
@@ -350,6 +362,7 @@ fuseBothMaybe p q = p
                  .| (q >>= check)
   where
     check x = (,x) . either Just (const Nothing) <$> awaitEither
+{-# INLINE fuseBothMaybe #-}
 
 -- | Useful prefix version of '|.'.
 --
@@ -360,6 +373,7 @@ fuseUpstream
     -> Pipe b c v m r
     -> Pipe a c u m v
 fuseUpstream p q = fst <$> fuseBoth p q
+{-# INLINE fuseUpstream #-}
 
 -- | Like @.|@, but get the result of /both/ pipes on termination, instead
 -- of just the second.  This means that @p &| q@ will only terminate with a result when
@@ -369,6 +383,7 @@ fuseUpstream p q = fst <$> fuseBoth p q
 -- @since 0.2.1.0
 (&|) :: Monad m => Pipe a b u m v -> Pipe b c v m r -> Pipe a c u m (v, r)
 (&|) = fuseBoth
+{-# INLINE (&|) #-}
 
 -- | Like @.|@, but keep the result of the /first/ pipe, instead of the
 -- second.  This means that @p |. q@ will only terminate with a result when
@@ -378,6 +393,7 @@ fuseUpstream p q = fst <$> fuseBoth p q
 -- @since 0.2.1.0
 (|.) :: Monad m => Pipe a b u m v -> Pipe b c v m r -> Pipe a c u m v
 (|.) = fuseUpstream
+{-# INLINE (|.) #-}
 
 infixr 2 &|
 infixr 2 |.
@@ -397,12 +413,9 @@ passthrough p = fmap fst . runStateP Nothing $
     .| hoistPipe lift p
     .| awaitForever tagIn
   where
-    passOn i = do
-      lift $ put (Just i)
-      yield i
-    tagIn i = do
-      yield . (,i) =<< lift get
-    
+    passOn i = lift (put (Just i)) *> yield i
+    tagIn i = yield . (,i) =<< lift get
+{-# INLINE passthrough #-}
 
 -- | Loop a pipe into itself.
 --
@@ -416,6 +429,7 @@ feedbackPipe
     => Pipe x x u m a
     -> Pipe x x u m a
 feedbackPipe = feedbackPipeEither . mapInput (either id id)
+{-# INLINE feedbackPipe #-}
 
 -- | A version of 'feedbackPipe' that distinguishes upstream input from
 -- downstream output fed back.  Gets 'Left' from upstream, and 'Right' from
@@ -443,6 +457,7 @@ feedbackPipeEither p = fmap fst . runStateP Seq.empty $
         lift $ put xs
         yield (Right x)
         popper
+{-# INLINE feedbackPipeEither #-}
 
 -- | A newtype wrapper over a source (@'Pipe' () o 'Void'@) that gives it an
 -- alternative 'Applicative' and 'Alternative' instance, matching "ListT
@@ -495,6 +510,7 @@ instance Monad m => Applicative (ZipSource m) where
 zipSource :: Monad m => Pipe () (a -> b) u m () -> Pipe () a v m () -> Pipe () b w m ()
 zipSource (PipeList fs) (PipeList xs) = PipeList . fmap Just $
     uncurry ($) <$> LT.zip (concatListT fs) (concatListT xs)
+{-# INLINE zipSource #-}
 
 concatListT :: Monad m => ListT m (Maybe a) -> ListT m a
 concatListT xs = ListT $ next xs >>= \case
@@ -524,6 +540,7 @@ toListT p = ListT $ runFT (pipeFree p)
         PAwaitF _ g -> pure $ Cons Nothing  (ListT . pNext $ g ())
         PYieldF x y -> pure $ Cons (Just x) (ListT . pNext $ y   )
     )
+{-# INLINE toListT #-}
 
 -- | A source is essentially 'ListT' producing a 'Maybe' result.  This
 -- converts a 'ListT' to the source it encodes.
@@ -549,6 +566,7 @@ genSource
 genSource f = Pipe $ FT $ \pDone pFree -> f $ \case
     Nothing      -> pDone ()
     Just (x, xs) -> pFree id (PYieldF x xs)
+{-# INLINE genSource #-}
 
 -- | A source can be "run" by providing a continuation to handle and
 -- sequence each of its outputs.  Is ths inverse of 'genSource'.
@@ -575,6 +593,7 @@ unconsZipSource
 unconsZipSource (ZipSource (PipeList p)) = next p <&> \case
     Cons x xs -> Just (x, ZipSource (PipeList xs))
     Nil       -> Nothing
+{-# INLINE unconsZipSource #-}
 
 -- | A newtype wrapper over a sink (@'Pipe' i 'Void'@) that gives it an
 -- alternative 'Applicative' and 'Alternative' instance.
@@ -631,6 +650,7 @@ zipSink
     -> Pipe i Void u m a
     -> Pipe i Void u m b
 zipSink (Pipe p) (Pipe q) = Pipe $ toFT $ zipSink_ (fromFT p) (fromFT q)
+{-# INLINE zipSink #-}
 
 -- | Distribute input to both sinks, and finishes with the result of
 -- the one that finishes first.
@@ -640,6 +660,7 @@ altSink
     -> Pipe i Void u m a
     -> Pipe i Void u m a
 altSink (Pipe p) (Pipe q) = Pipe $ toFT $ altSink_ (fromFT p) (fromFT q)
+{-# INLINE altSink #-}
 
 -- | '<*>' = distribute input to all, and return result when they finish
 --

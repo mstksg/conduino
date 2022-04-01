@@ -103,6 +103,7 @@ unfoldEither f = go
     go z = case f z of
       Left  r       -> pure r
       Right (x, z') -> yield x *> go z'
+{-# INLINE unfoldEither #-}
 
 -- | A version of 'unfold' that can terminate and end by returning
 -- 'Nothing'.
@@ -111,6 +112,7 @@ unfoldMaybe
     -> s
     -> Pipe i o u m ()
 unfoldMaybe f = unfoldEither (maybe (Left ()) Right . f)
+{-# INLINE unfoldMaybe #-}
 
 -- | Repeatedly apply an "unfolding" function to a given initial state,
 -- yielding the first item in the tuple as output and updating the state as
@@ -125,6 +127,7 @@ unfold f = go
     go z = yield x *> go z'
       where
         (x, z') = f z
+{-# INLINE unfold #-}
 
 -- | A version of 'iterateMaybe' that can specify a result value by
 -- providing it in the 'Left'.
@@ -133,6 +136,7 @@ iterateEither
     -> o
     -> Pipe i o u m a
 iterateEither f = unfoldEither (fmap (join (,)) . f)
+{-# INLINE iterateEither #-}
 
 -- | A version of 'iterate' that can choose to terminate and stop by
 -- returning 'Nothing'.
@@ -141,6 +145,7 @@ iterateMaybe
     -> o
     -> Pipe i o u m ()
 iterateMaybe f = unfoldMaybe (fmap (join (,)) . f)
+{-# INLINE iterateMaybe #-}
 
 -- | Repeatedly apply a function to a given starting value and yield each
 -- result forever.
@@ -164,18 +169,22 @@ iterate
     -> o
     -> Pipe i o u m a
 iterate f = unfold (join (,) . f)
+{-# INLINE iterate #-}
 
 -- | Yield every item in a foldable container.
 sourceList :: Foldable t => t a -> Pipe i a u m ()
 sourceList = traverse_ yield
+{-# INLINE sourceList #-}
 
 -- | Repeatedly yield a given item forever.
 repeat :: o -> Pipe i o u m a
 repeat = forever . yield
+{-# INLINE repeat #-}
 
 -- | Yield a given item a certain number of times.
 replicate :: Int -> o -> Pipe i o u m ()
 replicate n = replicateM_ n . yield
+{-# INLINE replicate #-}
 
 -- | Like 'repeatMaybeM', but allow specification of a final result type.
 repeatEitherM
@@ -187,6 +196,7 @@ repeatEitherM x = go
     go = lift x >>= \case
       Left r  -> pure r
       Right y -> yield y *> go
+{-# INLINE repeatEitherM #-}
 
 -- | Repeat a monadic action, yielding the item in the 'Just' every time.
 -- As soon as it sees 'Nothing', stop producing forever.
@@ -198,6 +208,7 @@ repeatMaybeM
     => m (Maybe o)
     -> Pipe i o u m ()
 repeatMaybeM = repeatEitherM . fmap (maybe (Left ()) Right)
+{-# INLINE repeatMaybeM #-}
 
 -- | Repeat a monadic action a given number of times, yielding each result,
 -- and then stop producing forever.
@@ -209,18 +220,21 @@ replicateM
     => Int
     -> m o
     -> Pipe i o u m ()
-replicateM n x = replicateM_ n $ lift x >>= yield
+replicateM n = replicateM_ n . (yield =<<) . lift
+{-# INLINE replicateM #-}
 
 -- | Source from each line received from 'stdin'.  This stops as soon as
 -- end-of-file is reached, or an empty line is seen.
 stdinLines :: MonadIO m => Pipe i String u m ()
 stdinLines = sourceHandleLines S.stdin
           .| takeWhile (not . null)
+{-# INLINE stdinLines #-}
 
 -- | Source from stdin, yielding bytestrings as they are drawn.  If you
 -- want to retrieve each line as a string, see 'stdinLines'.
 stdin :: MonadIO m => Pipe i BS.ByteString u m ()
 stdin = sourceHandle S.stdin
+{-# INLINE stdin #-}
 
 -- | Source from a given I/O handle, yielding each line drawn as a string.
 -- To draw raw bytes, use 'sourceHandle'.
@@ -240,6 +254,7 @@ sourceHandleLines h = repeatMaybeM $ do
                 (guard . isEOFError)
                 (Just <$> S.hGetLine h)
                 $ \_ -> pure Nothing
+{-# INLINE sourceHandleLines #-}
 
 -- | Source from a given I/O handle, yielding each line drawn as a string.
 -- To draw raw bytes, use 'sourceHandle'.
@@ -257,6 +272,7 @@ sourceHandleLinesText h = repeatMaybeM $ do
                 (guard . isEOFError)
                 (Just <$> T.hGetLine h)
                 $ \_ -> pure Nothing
+{-# INLINE sourceHandleLinesText #-}
 
 -- | Source from a given I/O handle, yielding bytestrings as they are
 -- pulled.  If you want to retrieve each line as a string, see
@@ -269,6 +285,7 @@ sourceHandle h = repeatMaybeM
                . fmap (mfilter (not . BS.null) . Just)
                . liftIO
                $ BS.hGetSome h BSL.defaultChunkSize
+{-# INLINE sourceHandle #-}
 
 -- | Sink into a given I/O handle, writing each input to the handle.
 sinkHandle
@@ -277,14 +294,17 @@ sinkHandle
     -> Pipe BS.ByteString o u m ()
 sinkHandle h = mapM (liftIO . BS.hPut h)
             .| sinkNull
+{-# INLINE sinkHandle #-}
 
 -- | A sink into stdout.
 stdout :: MonadIO m => Pipe BS.ByteString o u m ()
 stdout = sinkHandle S.stdout
+{-# INLINE stdout #-}
 
 -- | A sink into stderr.
 stderr :: MonadIO m => Pipe BS.ByteString o u m ()
 stderr = sinkHandle S.stderr
+{-# INLINE stderr #-}
 
 -- | Repeat a monadic action forever, yielding each output.
 --
@@ -297,15 +317,18 @@ repeatM
 repeatM x = go
   where
     go = (yield =<< lift x) *> go
+{-# INLINE repeatM #-}
 
 -- | Process every incoming item with a pure function, and yield its
 -- output.
 map :: (i -> o) -> Pipe i o u m u
 map f = awaitForever (yield . f)
+{-# INLINE map #-}
 
 -- | Map a monadic function to process every input, and yield its output.
 mapM :: Monad m => (i -> m o) -> Pipe i o u m u
 mapM f = awaitForever ((yield =<<) . lift . f)
+{-# INLINE mapM #-}
 
 -- | Execute a monadic function to process every input, passing through the
 -- original value back downstream.
@@ -313,6 +336,7 @@ mapM f = awaitForever ((yield =<<) . lift . f)
 -- @since 0.2.1.0
 iterM :: Monad m => (i -> m ()) -> Pipe i i u m u
 iterM f = mapM (\x -> x <$ f x)
+{-# INLINE iterM #-}
 
 -- | Map a pure "stateful" function over each incoming item.  Give
 -- a function to update the state and return an output and an initial
@@ -326,6 +350,7 @@ mapAccum f = go
     go !x = awaitWith $ \y ->
         let (!x', !z) = f y x
         in  yield z *> go x'
+{-# INLINE mapAccum #-}
 
 -- | Like 'foldl', but yields every accumulator value downstream.
 --
@@ -343,6 +368,7 @@ scan f = go
     go !x = awaitWith $ \y ->
       let x' = f x y
       in  yield x' *> go x'
+{-# INLINE scan #-}
 
 -- | Yield consecutive pairs of values.
 --
@@ -356,6 +382,7 @@ pairs = awaitWith go
     go x = awaitWith $ \y -> do
       yield (x, y)
       go y
+{-# INLINE pairs #-}
 
 -- | Yield consecutive runs of at most @n@ of values, starting with an
 -- empty sequence.
@@ -380,7 +407,7 @@ consecutive n = go Seq.empty
     go xs = do
       yield xs
       awaitWith $ \y -> go . Seq.drop (Seq.length xs - n + 1) $ (xs Seq.:|> y)
-
+{-# INLINE consecutive #-}
 
 -- | Let a given number of items pass through the stream uninhibited, and
 -- then stop producing forever.
@@ -396,6 +423,7 @@ consecutive n = go Seq.empty
 take :: Int -> Pipe i i u m ()
 take n = void . runMaybeT . replicateM_ n $
     lift . yield =<< MaybeT await
+{-# INLINE take #-}
 
 -- | Let elements pass until an element is received that does not satisfy
 -- the predicate, then stop producing forever.
@@ -409,12 +437,14 @@ takeWhile p = go
       Just x
         | p x       -> yield x *> go
         | otherwise -> pure ()
+{-# INLINE takeWhile #-}
 
 -- | Only allow values satisfying a predicate to pass.
 filter
     :: (i -> Bool)
     -> Pipe i i u m u
 filter p = awaitForever $ \x -> when (p x) $ yield x
+{-# INLINE filter #-}
 
 -- | Map a function returning a container onto every incoming item, and
 -- yield all of the outputs from that function.
@@ -423,11 +453,13 @@ concatMap
     => (i -> t o)
     -> Pipe i o u m u
 concatMap f = awaitForever (sourceList . f)
+{-# INLINE concatMap #-}
 
 -- | Take an input of containers and output each of their elements
 -- successively.
 concat :: Foldable t => Pipe (t i) i u m u
 concat = awaitForever sourceList
+{-# INLINE concat #-}
 
 -- | Right-fold every input into an accumulated value.
 --
@@ -439,6 +471,7 @@ foldr f z = go
     go = await >>= \case
       Nothing -> pure z
       Just x  -> f x <$> go
+{-# INLINE foldr #-}
 
 -- | Left-fold every input into an accumulated value.
 --
@@ -450,11 +483,13 @@ foldl f = go
     go !z = await >>= \case
       Nothing -> pure z
       Just !x -> go (f z x)
+{-# INLINE foldl #-}
 
 -- | Fold every incoming item monoidally, and return the result once
 -- finished.
 fold :: Monoid a => Pipe a o u m a
 fold = foldl (<>) mempty
+{-# INLINE fold #-}
 
 -- | Fold every incoming item according to a monoidal projection, and
 -- return the result once finished.
@@ -471,13 +506,16 @@ fold = foldl (<>) mempty
 -- @
 foldMap :: Monoid a => (i -> a) -> Pipe i o u m a
 foldMap f = foldl (\x y -> x <> f y) mempty
+{-# INLINE foldMap #-}
 
 -- | Sink every incoming item into a list.
 --
 -- Note that this keeps the entire list in memory until it is all
--- eventually read.
+-- eventually read, and does no "lazy IO".  It exhauts the whole stream
+-- before returning anything.
 sinkList :: Pipe i o u m [i]
 sinkList = foldr (:) []
+{-# INLINE sinkList #-}
 
 -- | Ignore a certain amount of items from the input stream, and then stop
 -- producing forever.
@@ -489,6 +527,7 @@ sinkList = foldr (:) []
 -- [4,5,6,7,8]
 drop :: Int -> Pipe i o u m ()
 drop n = replicateM_ n await
+{-# INLINE drop #-}
 
 -- | Ignore items from an input stream as long as they match a predicate.
 -- Afterwards, stop producing forever.
@@ -505,6 +544,7 @@ dropWhile p = go
       Just x
         | p x       -> go
         | otherwise -> pure ()
+{-# INLINE dropWhile #-}
 
 -- | Consume an entire input stream and ignore all of its outputs.
 sinkNull :: Pipe i o u m ()
@@ -516,4 +556,9 @@ sinkNull = await >>= \case
 --
 -- To get the first item ("head"), use 'await' or 'awaitSurely'.
 last :: Pipe i o u m (Maybe i)
-last = fmap getLast <$> foldMap (Just . Last)
+last = go Nothing
+  where
+    go x = await >>= \case
+      Nothing -> pure x
+      Just r  -> go (Just r)
+{-# INLINE last #-}
