@@ -165,22 +165,6 @@ statePS f = do
     x <$ lift (SS.put s')
 {-# INLINE statePS #-}
 
--- | 'runStateP', but for "Control.Monad.Trans.State.Strict".
---
--- @since 0.2.1.0
-runStatePS
-    :: Monad m
-    => s
-    -> Pipe i o u (SS.StateT s m) a
-    -> Pipe i o u m (a, s)
-runStatePS = withRecPipe . go
-  where
-    go s (FreeT p) = FreeT $ SS.runStateT p s <&> \(q, s') ->
-      case q of
-        Pure x -> Pure (x, s')
-        Free l -> Free $ go s' <$> l
-{-# INLINE runStatePS #-}
-
 -- | 'execStateP', but for "Control.Monad.Trans.State.Strict".
 --
 -- @since 0.2.1.0
@@ -315,10 +299,19 @@ runCatchP
     :: Monad m
     => Pipe i o u (CatchT m) a
     -> Pipe i o u m (Either SomeException a)
-runCatchP (Pipe (FT f)) = Pipe $ FT $ \pr bd -> either (pr . Left) pure =<< runCatchT (
-      f (lift . pr . Right)
-        (\c -> lift . bd (either (pr . Left) pure <=< runCatchT . c))
-    )
+-- runCatchP (Pipe (FT f)) = Pipe $ FT $ \pr bd -> either (pr . Left) pure =<< runCatchT (
+--       f (lift . pr . Right)
+--         (\c -> lift . bd (either (pr . Left) pure <=< runCatchT . c))
+--     )
+runCatchP = withRecPipe go
+  where
+    go (FreeT p) = FreeT $ runCatchT p <&>
+      either (Pure . Left)
+             (\case Pure x -> Pure (Right x); Free l -> Free (go <$> l))
+      -- \case
+      -- Left  e        -> Pure $ Left e
+      -- Right (Pure x) -> Pure $ Right x
+      -- Right (Free l) -> Free $ go <$> l
 {-# INLINE runCatchP #-}
 
 -- | Turn a "parameterized 'Pipe'" into a 'Pipe' that runs over 'ReaderT',

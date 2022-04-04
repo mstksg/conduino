@@ -26,13 +26,13 @@ module Data.Conduino.Internal (
     Pipe(..)
   , PipeF(..)
   , awaitEither
-  , yield
-  , trimapPipe, mapInput, mapOutput, mapUpRes
+  , yield, yieldLazy
+  , trimapPipe, trimapPipeF, mapInput, mapOutput, mapUpRes
   , hoistPipe
   , RecPipe
   , toRecPipe, fromRecPipe
   , withRecPipe
-  , runStateP
+  , runStateP, runStatePS
   , pAwaitF, pYieldF
   ) where
 
@@ -46,6 +46,7 @@ import           Control.Monad.Trans.Free        (FreeT(..), FreeF(..))
 import           Control.Monad.Trans.Free.Church
 import           Control.Monad.Trans.State
 import           Data.Functor
+import qualified Control.Monad.Trans.State.Strict  as SS
 
 #if !MIN_VERSION_base(4,13,0)
 import           Control.Monad.Fail
@@ -70,10 +71,14 @@ import           Control.Monad.Fail
 -- thing but explicitly recursive.
 data PipeF i o u a =
       PAwaitF (u -> a) (i -> a)
+      -- todo: strict version?
     | PYieldF o a
   deriving Functor
 
 makeFree ''PipeF
+
+{-# INLINE pYieldF #-}
+{-# INLINE pAwaitF #-}
 
 -- | Similar to a conduit from the /conduit/ package.
 --
@@ -179,9 +184,18 @@ awaitEither = pAwaitF
 {-# INLINE awaitEither #-}
 
 -- | Send output downstream.
+--
+-- Since v0.2.3.0, is strict.  See 'yieldLazy' for the original behavior.
 yield :: o -> Pipe i o u m ()
-yield = pYieldF
+yield x = x `seq` yieldLazy x
 {-# INLINE yield #-}
+
+-- | Send output downstream without forcing its argument.
+--
+-- @since 0.2.3.0
+yieldLazy :: o -> Pipe i o u m ()
+yieldLazy = pYieldF
+{-# INLINE yieldLazy #-}
 
 -- | Map over the input type, output type, and upstream result type.
 --
@@ -192,12 +206,19 @@ trimapPipe
     -> (u -> v)
     -> Pipe j p v m a
     -> Pipe i o u m a
-trimapPipe f g h = Pipe . transFT go . pipeFree
-  where
-    go = \case
-      PAwaitF a b -> PAwaitF (a . h) (b . f)
-      PYieldF a x -> PYieldF (g a) x
+trimapPipe f g h (Pipe p) = Pipe (transFT (trimapPipeF f g h) p)
 {-# INLINE trimapPipe #-}
+
+trimapPipeF
+    :: (i -> j)
+    -> (p -> o)
+    -> (u -> v)
+    -> PipeF j p v a
+    -> PipeF i o u a
+trimapPipeF f g h = \case
+    PAwaitF a b -> PAwaitF (a . h) (b . f)
+    PYieldF a x -> PYieldF (g a) x
+{-# INLINE trimapPipeF #-}
 
 -- | Transform the underlying monad of a pipe.
 --
@@ -239,8 +260,13 @@ type RecPipe i o u = FreeT (PipeF i o u)
 -- defined in terms of 'Pipe', it can be easier to write certain low-level
 -- pipe combining functions in terms of 'RecPipe' than 'Pipe'.
 toRecPipe :: Monad m => Pipe i o u m a -> RecPipe i o u m a
-toRecPipe = fromFT . pipeFree
+toRecPipe = _fromFT . pipeFree
 {-# INLINE toRecPipe #-}
+
+-- | An inlined version of fromFT
+_fromFT :: (Monad m, Functor f) => FT f m a -> FreeT f m a
+_fromFT (FT k) = FreeT $ k (return . Pure) (\xg -> runFreeT . wrap . fmap (FreeT . xg))
+{-# INLINE _fromFT #-}
 
 -- | Convert a 'RecPipe' back into a 'Pipe'.
 fromRecPipe :: Monad m => RecPipe i o u m a -> Pipe i o u m a
@@ -315,4 +341,20 @@ runStateP = withRecPipe . go
         Pure x -> Pure (x, s')
         Free l -> Free $ go s' <$> l
 {-# INLINE runStateP #-}
+
+-- | 'runStateP', but for "Control.Monad.Trans.State.Strict".
+--
+-- @since 0.2.1.0
+runStatePS
+    :: Monad m
+    => s
+    -> Pipe i o u (SS.StateT s m) a
+    -> Pipe i o u m (a, s)
+runStatePS = withRecPipe . go
+  where
+    go s (FreeT p) = FreeT $ SS.runStateT p s <&> \(q, s') ->
+      case q of
+        Pure x -> Pure (x, s')
+        Free l -> Free $ go s' <$> l
+{-# INLINE runStatePS #-}
 

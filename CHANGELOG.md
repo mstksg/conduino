@@ -14,6 +14,7 @@ Version 0.2.3.0
 *   `passthrough` pipe manipulation
 *   More efficient `runExceptP`, `runCatchP`
 *   More explicit inlining
+*   `yield` is strict by default.  Use `yieldLazy` for original lazy behavior.
 
 Version 0.2.2.0
 ---------------

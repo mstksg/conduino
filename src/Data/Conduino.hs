@@ -62,7 +62,8 @@ module Data.Conduino (
   , (.|)
   , runPipe, runPipePure
   -- * Primitives
-  , awaitEither, await, awaitWith, awaitSurely, awaitForever, yield
+  , awaitEither, await, awaitWith, awaitSurely, awaitForever
+  , yield, yieldLazy
   -- * Special chaining
   , (&|), (|.)
   , fuseBoth, fuseUpstream, fuseBothMaybe
@@ -89,18 +90,19 @@ module Data.Conduino (
 import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.Trans.Class
-import           Control.Monad.Trans.Free        (FreeT(..), FreeF(..))
+import           Control.Monad.Trans.Free         (FreeT(..), FreeF(..))
 import           Control.Monad.Trans.Free.Church
 import           Control.Monad.Trans.State
 import           Data.Bifunctor
 import           Data.Conduino.Internal
 import           Data.Functor
 import           Data.Functor.Identity
-import           Data.Sequence                   (Seq(..))
+import           Data.Sequence                    (Seq(..))
 import           Data.Void
-import           List.Transformer                (ListT(..), Step(..))
-import qualified Data.Sequence                   as Seq
-import qualified List.Transformer                as LT
+import           List.Transformer                 (ListT(..), Step(..))
+import qualified Control.Monad.Trans.State.Strict as SS
+import qualified Data.Sequence                    as Seq
+import qualified List.Transformer                 as LT
 
 -- | Await input from upstream.  Will block until upstream 'yield's.
 --
@@ -279,7 +281,7 @@ squeezePipeEither
     :: Monad m
     => Pipe i o u m a
     -> m ([o], Either (Either u i -> Pipe i o u m a) a)
-squeezePipeEither p = runFT (pipeFree p)
+squeezePipeEither (Pipe (FT p)) = p
     (pure . ([],) . Right)
     (\pNext -> \case
         PAwaitF f g -> pure . ([],) . Left $ (unSqueeze =<<) . lift . pNext . either f g
@@ -316,7 +318,7 @@ squeezePipeEither p = runFT (pipeFree p)
     => Pipe a b u m v
     -> Pipe b c v m r
     -> Pipe a c u m r
-Pipe p .| Pipe q = Pipe $ toFT $ compPipe_ (fromFT p) (fromFT q)
+p .| q = fromRecPipe $ compPipe_ (toRecPipe p) (toRecPipe q)
 infixr 2 .|
 {-# INLINE (.|) #-}
 
@@ -408,13 +410,13 @@ passthrough
     :: Monad m
     => Pipe i o u m a
     -> Pipe i (Maybe i, o) u m a
-passthrough p = fmap fst . runStateP Nothing $
+passthrough p = fmap fst . runStatePS Nothing $
        awaitForever passOn
     .| hoistPipe lift p
     .| awaitForever tagIn
   where
-    passOn i = lift (put (Just i)) *> yield i
-    tagIn i = yield . (,i) =<< lift get
+    passOn i = lift (SS.put (Just i)) *> yield i
+    tagIn i = yield . (,i) =<< lift SS.get
 {-# INLINE passthrough #-}
 
 -- | Loop a pipe into itself.
@@ -444,17 +446,17 @@ feedbackPipeEither
     :: Monad m
     => Pipe (Either i o) o u m a
     -> Pipe i o u m a
-feedbackPipeEither p = fmap fst . runStateP Seq.empty $
+feedbackPipeEither p = fmap fst . runStatePS Seq.empty $
        popper
     .| hoistPipe lift p
-    .| awaitForever (\x -> lift (modify (:|> x)) *> yield x)
+    .| awaitForever (\x -> lift (SS.modify (:|> x)) *> yield x)
   where
-    popper = lift get >>= \case
+    popper = lift SS.get >>= \case
       Empty -> awaitEither >>= \case
         Left r  -> pure r
         Right x -> yield (Left x) >> popper
       x :<| xs -> do
-        lift $ put xs
+        lift $ SS.put xs
         yield (Right x)
         popper
 {-# INLINE feedbackPipeEither #-}
@@ -534,7 +536,7 @@ toListT
     :: Applicative m
     => Pipe () o u m ()
     -> ListT m (Maybe o)
-toListT p = ListT $ runFT (pipeFree p)
+toListT (Pipe (FT p)) = ListT $ p
     (\_ -> pure Nil)
     (\pNext -> \case
         PAwaitF _ g -> pure $ Cons Nothing  (ListT . pNext $ g ())
@@ -576,7 +578,7 @@ withSource
     :: Pipe () o u m ()
     -> (Maybe (o, m r) -> m r)    -- ^ handler ('Nothing' = done, @'Just' (x, next)@ = yielded value and next action
     -> m r
-withSource p f = runFT (pipeFree p)
+withSource (Pipe (FT p)) f = p
     (\_ -> f Nothing)
     (\pNext -> \case
         PAwaitF _ g -> pNext $ g ()
@@ -649,7 +651,7 @@ zipSink
     => Pipe i Void u m (a -> b)
     -> Pipe i Void u m a
     -> Pipe i Void u m b
-zipSink (Pipe p) (Pipe q) = Pipe $ toFT $ zipSink_ (fromFT p) (fromFT q)
+zipSink p q = fromRecPipe $ zipSink_ (toRecPipe p) (toRecPipe q)
 {-# INLINE zipSink #-}
 
 -- | Distribute input to both sinks, and finishes with the result of
@@ -659,7 +661,7 @@ altSink
     => Pipe i Void u m a
     -> Pipe i Void u m a
     -> Pipe i Void u m a
-altSink (Pipe p) (Pipe q) = Pipe $ toFT $ altSink_ (fromFT p) (fromFT q)
+altSink p q = fromRecPipe $ altSink_ (toRecPipe p) (toRecPipe q)
 {-# INLINE altSink #-}
 
 -- | '<*>' = distribute input to all, and return result when they finish
