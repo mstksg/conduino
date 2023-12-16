@@ -1,12 +1,13 @@
+{-# LANGUAGE DataKinds                  #-}
 {-# LANGUAGE DeriveFunctor              #-}
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE PatternSynonyms            #-}
+{-# LANGUAGE PolyKinds                  #-}
 {-# LANGUAGE RankNTypes                 #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TupleSections              #-}
-{-# LANGUAGE TypeInType                 #-}
 {-# LANGUAGE ViewPatterns               #-}
 
 -- |
@@ -78,9 +79,9 @@ module Data.Conduino (
   -- * Wrappers
   , ZipSource(..)
   , unconsZipSource
-  , zipSource
+  , zipSource, liftZipSource
   , ZipSink(..)
-  , zipSink, altSink
+  , zipSink, liftZipSink, altSink
   -- * Generators
   , toListT, fromListT
   , pattern PipeList
@@ -92,7 +93,6 @@ import           Control.Monad
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Free         (FreeT(..), FreeF(..))
 import           Control.Monad.Trans.Free.Church
-import           Control.Monad.Trans.State
 import           Data.Bifunctor
 import           Data.Conduino.Internal
 import           Data.Functor
@@ -524,8 +524,13 @@ instance Monad m => Alternative (ZipSource m) where
     empty = ZipSource $ pure ()
     ZipSource p <|> ZipSource q = ZipSource (p *> q)
 
-instance MonadTrans ZipSource where
-    lift = ZipSource . (yield =<<) . lift
+-- | Lift an action into a 'ZipSource'.  Note that this replaces the previous
+-- "morally incorrect" 'MonadTrans' instance for 'ZipSource'.
+--
+-- @since 0.2.4.0
+liftZipSource :: Monad m => m a -> ZipSource m a
+liftZipSource = ZipSource . (yield =<<) . lift
+{-# INLINE liftZipSource #-}
 
 -- | A source is essentially equivalent to 'ListT' producing a 'Maybe'
 -- result.  This converts it to the 'ListT' it encodes.
@@ -681,5 +686,10 @@ instance Monad m => Alternative (ZipSink i u m) where
         go = forever await
     ZipSink p <|> ZipSink q = ZipSink $ altSink p q
 
-instance MonadTrans (ZipSink i u) where
-    lift = ZipSink . lift
+-- | Lift an action into a 'ZipSource'.  Note that this replaces the previous
+-- "morally incorrect" 'MonadTrans' instance for 'ZipSource'.
+--
+-- @since 0.2.4.0
+liftZipSink :: Monad m => m a -> ZipSink i u m a
+liftZipSink = ZipSink . lift
+{-# INLINE liftZipSink #-}

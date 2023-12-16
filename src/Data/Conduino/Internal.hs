@@ -1,12 +1,13 @@
 {-# LANGUAGE CPP                        #-}
+{-# LANGUAGE DataKinds                  #-}
 {-# LANGUAGE DeriveFunctor              #-}
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
+{-# LANGUAGE PolyKinds                  #-}
 {-# LANGUAGE RankNTypes                 #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TemplateHaskell            #-}
-{-# LANGUAGE TypeInType                 #-}
 {-# LANGUAGE TypeOperators              #-}
 {-# OPTIONS_HADDOCK not-home            #-}
 
@@ -50,6 +51,10 @@ import qualified Control.Monad.Trans.State.Strict  as SS
 
 #if !MIN_VERSION_base(4,13,0)
 import           Control.Monad.Fail
+#endif
+
+#if MIN_VERSION_base(4,18,0)
+import           Control.Monad (MonadPlus)
 #endif
 
 -- | Base functor of 'Pipe'.

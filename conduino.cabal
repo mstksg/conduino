@@ -7,7 +7,7 @@ cabal-version: 1.12
 -- hash: 94a4f8415936756af3ddab6ae4a237db4a3f8ee9d4b93ce27fe211cceca6761b
 
 name:           conduino
-version:        0.2.3.0
+version:        0.2.4.0
 synopsis:       Lightweight composable continuation-based stream processors
 description:    A lightweight continuation-based stream processing library.
                 .

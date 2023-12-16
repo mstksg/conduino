@@ -1,6 +1,17 @@
 Changelog
 =========
 
+Version 0.2.4.0
+---------------
+
+*December 15, 2023*
+
+<https://github.com/mstksg/conduino/releases/tag/v0.2.4.0>
+
+*   Remove the "morally incorrect" `MonadTrans` instance for `ZipSource` and
+    `ZipSink`, and replace them with `liftZipSource` and `liftZipSink`.  This
+    also adds compatibility with *transformers-0.6*.
+
 Version 0.2.3.0
 ---------------
 
